@@ -1,0 +1,90 @@
+# ==========================================
+# MediNexus - .gitignore
+# ==========================================
+
+### Maven ###
+HELP.md
+target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### Spring Boot ###
+*.log
+logs/
+*.pid
+
+### Environment Variables & Secrets ###
+.env
+.env.*
+!.env.example
+*.secret
+*.secrets
+*.key
+*.pem
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+### Spring Tool Suite / Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+.history/
+
+### React / Node.js ###
+node_modules/
+dist/
+coverage/
+.npm/
+*.tsbuildinfo
+
+### Gradle ###
+.gradle/
+
+### Operating System ###
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+### Temporary Files ###
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+### Docker ###
+*.tar
+*.tar.gz
+
+### Local Database Files ###
+*.sqlite
+*.sqlite3
+*.db
+
+### Test Reports ###
+test-results/
+
+### Keep Empty Directories ###
+!.gitkeep
