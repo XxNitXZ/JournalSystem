@@ -1,0 +1,111 @@
+/* Global design tokens and base element styles. */
+
+:root {
+  --color-bg: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-text: #1f2933;
+  --color-text-muted: #52606d;
+  --color-border: #d9e2ec;
+  --color-accent: #0b6e8a;
+  --color-accent-contrast: #ffffff;
+  --color-accent-soft: rgba(11, 110, 138, 0.1);
+  --color-focus: #0b6e8a;
+  --color-success: #2f9e44;
+  --color-code-bg: #edf1f5;
+
+  --font-sans: system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono: ui-monospace, Consolas, 'Liberation Mono', monospace;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+
+  --radius: 6px;
+  --content-width: 1100px;
+
+  color-scheme: light dark;
+  font-family: var(--font-sans);
+  font-size: 100%;
+  line-height: 1.6;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #12161c;
+    --color-surface: #1a2028;
+    --color-text: #e4e9ef;
+    --color-text-muted: #a3b1bf;
+    --color-border: #2c3542;
+    --color-accent: #5cc2dc;
+    --color-accent-contrast: #0b1a20;
+    --color-accent-soft: rgba(92, 194, 220, 0.15);
+    --color-focus: #5cc2dc;
+    --color-success: #51cf66;
+    --color-code-bg: #232b36;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 var(--space-4);
+  line-height: 1.2;
+  color: var(--color-text);
+}
+
+h1 {
+  font-size: clamp(1.75rem, 1.25rem + 2vw, 2.5rem);
+  font-weight: 700;
+}
+
+p {
+  margin: 0 0 var(--space-4);
+}
+
+a {
+  color: var(--color-accent);
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  background: var(--color-code-bg);
+  overflow-wrap: anywhere;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+}
