@@ -1,3 +1,5 @@
+import BackendStatus from '../components/ui/BackendStatus.tsx'
+
 function HomePage() {
   return (
     <section className="page" aria-labelledby="home-title">
@@ -12,6 +14,7 @@ function HomePage() {
         The MediPortal frontend is initialized and ready for feature
         development.
       </p>
+      <BackendStatus />
     </section>
   )
 }

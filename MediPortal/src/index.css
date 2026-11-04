@@ -11,6 +11,7 @@
   --color-accent-soft: rgba(11, 110, 138, 0.1);
   --color-focus: #0b6e8a;
   --color-success: #2f9e44;
+  --color-danger: #c92a2a;
   --color-code-bg: #edf1f5;
 
   --font-sans: system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
@@ -52,6 +53,7 @@
     --color-accent-soft: rgba(92, 194, 220, 0.15);
     --color-focus: #5cc2dc;
     --color-success: #51cf66;
+    --color-danger: #ff6b6b;
     --color-code-bg: #232b36;
   }
 }
