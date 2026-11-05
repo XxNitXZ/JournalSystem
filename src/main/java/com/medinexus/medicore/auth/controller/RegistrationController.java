@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.medinexus.medicore.auth.dto.RegistrationRequest;
 import com.medinexus.medicore.auth.dto.RegistrationResponse;
-import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.entity.User;
 import com.medinexus.medicore.auth.service.RegistrationService;
 
@@ -27,7 +26,7 @@ public class RegistrationController {
 
     @PostMapping("/register")
     public ResponseEntity<RegistrationResponse> register(@RequestBody RegistrationRequest request) {
-        User user = registrationService.register(request.email(), request.password(), Role.PATIENT);
+        User user = registrationService.register(request.email(), request.password(), request.role());
         return ResponseEntity.status(HttpStatus.CREATED).body(new RegistrationResponse(user.getId(), user.getEmail(), user.getRole()));
     }
 

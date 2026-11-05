@@ -1,4 +1,6 @@
 package com.medinexus.medicore.auth.dto;
 
-public record RegistrationRequest(String email, String password) {
+import com.medinexus.medicore.auth.entity.Role;
+
+public record RegistrationRequest(String email, String password, Role role) {
 }
