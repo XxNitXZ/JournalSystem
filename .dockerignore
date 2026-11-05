@@ -1,0 +1,19 @@
+# Build context for the MediCore backend image (Dockerfile in this directory).
+#
+# Allow-list: everything is excluded except what the Maven build needs.
+# This keeps MediPortal/, infrastructure/, target/, IDE settings and any local
+# secret files out of the build context.
+*
+!pom.xml
+!mvnw
+!.mvn/
+!src/
+
+# Never send local secrets, even if they end up inside an allowed directory.
+**/.env
+**/.env.*
+**/*.local
+**/*.secret
+**/*.secrets
+**/*.key
+**/*.pem

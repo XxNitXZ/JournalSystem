@@ -7,15 +7,22 @@
     Idempotent start script for the MediNexus development database.
 
       * No container yet  -> checks port 5432, asks for a password, creates the
-                             volume (if missing) and the container.
+                             volume (if missing) and the container, attached
+                             to the Docker network medinexus-network.
       * Container stopped -> checks port 5432 and starts it.
       * Container running -> reuses it.
+
+    The Docker network medinexus-network (used by MediCore to reach the
+    database) is created if it does not exist. An existing container that is
+    not attached to it is attached with "docker network connect"; its other
+    network connections are kept.
 
     In every case the script verifies that an existing container matches the
     expected image, volume mount and port binding, and waits for PostgreSQL to
     accept connections (pg_isready) with a bounded number of retries.
 
-    The script never deletes, recreates or overwrites containers or volumes.
+    The script never deletes, recreates or overwrites containers, volumes or
+    networks.
 
     macOS equivalent: start-postgres.sh (keep the configuration identical).
 
@@ -34,6 +41,7 @@ $ErrorActionPreference = 'Stop'
 $PostgresImage     = 'postgres:18'
 $ContainerName     = 'medinexus-postgres'
 $VolumeName        = 'medinexus-postgres-data'
+$NetworkName       = 'medinexus-network'
 $DatabaseName      = 'medinexus_db'
 $DatabaseUser      = 'medinexus'
 $HostAddress       = '127.0.0.1'
@@ -50,6 +58,7 @@ $PasswordAttempts  = 3
 # arguments to native programs.
 $MountsTemplate = '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Destination}};{{end}}'
 $PortsTemplate  = '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{$p}}={{.HostIp}}:{{.HostPort}};{{end}}{{end}}'
+$NetworksTemplate = '{{range $k, $v := .NetworkSettings.Networks}}{{$k}};{{end}}'
 
 $ExpectedImages = @($PostgresImage, "docker.io/library/$PostgresImage")
 $ExpectedMount  = "volume|$VolumeName|$DataMountPath"
@@ -172,6 +181,46 @@ function Assert-ContainerConfiguration {
             "         docker rename $ContainerName $ContainerName-old")
     }
     Write-Success "Existing container '$ContainerName' matches the expected configuration."
+}
+
+# ---------------------------------------------------------------------------
+# Docker network (create / connect only - never disconnect or delete)
+# ---------------------------------------------------------------------------
+# Creates the shared network if it does not exist yet.
+function Initialize-Network {
+    $result = Invoke-Docker @('network', 'inspect', '--format', '{{.Name}}', $NetworkName)
+    if ($result.ExitCode -eq 0) {
+        Write-Success "Docker network '$NetworkName' exists."
+        return
+    }
+    if ($result.StdErr -notmatch 'not found|no such network') {
+        Stop-WithError "Could not inspect network '$NetworkName': $($result.StdErr)"
+    }
+
+    Write-Info "Creating Docker network '$NetworkName'..."
+    $create = Invoke-Docker @('network', 'create', $NetworkName)
+    if ($create.ExitCode -ne 0) {
+        Stop-WithError "Could not create network '$NetworkName': $($create.StdErr)"
+    }
+    Write-Success "Docker network '$NetworkName' created."
+}
+
+# Attaches the existing container to the network if needed. Works for running
+# and stopped containers, does not restart PostgreSQL and keeps all other
+# network connections.
+function Connect-ContainerToNetwork {
+    $networks = Get-InspectValue $NetworksTemplate
+    if (@($networks.Split(';')) -contains $NetworkName) {
+        Write-Success "Container '$ContainerName' is connected to network '$NetworkName'."
+        return
+    }
+
+    Write-Info "Connecting container '$ContainerName' to network '$NetworkName' (existing connections are kept)..."
+    $result = Invoke-Docker @('network', 'connect', $NetworkName, $ContainerName)
+    if ($result.ExitCode -ne 0) {
+        Stop-WithError "Could not connect '$ContainerName' to network '$NetworkName': $($result.StdErr)"
+    }
+    Write-Success "Container '$ContainerName' connected to network '$NetworkName'."
 }
 
 # Returns a list of human-readable descriptions of anything using the host port.
@@ -312,6 +361,7 @@ function New-PostgresContainer([string]$Password) {
         & docker run `
             --detach `
             --name $ContainerName `
+            --network $NetworkName `
             --publish "${HostAddress}:${HostPort}:${ContainerPort}" `
             --volume "${VolumeName}:${DataMountPath}" `
             --env "POSTGRES_DB=$DatabaseName" `
@@ -379,6 +429,7 @@ function Show-ConnectionInfo {
     Write-Host "  Username:  $DatabaseUser"
     Write-Host "  JDBC URL:  jdbc:postgresql://${HostAddress}:${HostPort}/$DatabaseName"
     Write-Host "  Volume:    $VolumeName"
+    Write-Host "  Network:   $NetworkName (MediCore uses jdbc:postgresql://${ContainerName}:${ContainerPort}/$DatabaseName)"
     Write-Host ''
     Write-Host "  Stop:      docker stop $ContainerName"
     Write-Host "  psql:      docker exec -it $ContainerName psql -U $DatabaseUser -d $DatabaseName"
@@ -389,6 +440,7 @@ function Show-ConnectionInfo {
 # ---------------------------------------------------------------------------
 Write-Info "MediNexus PostgreSQL ($PostgresImage), container '$ContainerName'"
 Assert-DockerAvailable
+Initialize-Network
 
 $containerState = Get-ContainerState
 
@@ -398,9 +450,11 @@ if ($null -ne $containerState) {
 
     switch ($containerState) {
         'running' {
+            Connect-ContainerToNetwork
             Write-Success "Container '$ContainerName' is already running."
         }
         { $_ -in @('exited', 'created') } {
+            Connect-ContainerToNetwork
             Assert-PortFree
             Start-ExistingContainer
         }
