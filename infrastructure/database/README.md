@@ -76,16 +76,21 @@ bash infrastructure/database/start-postgres.sh
 What the script does:
 
 1. Checks that Docker Desktop is running.
-2. Checks whether the container `medinexus-postgres` exists.
+2. Creates the Docker network `medinexus-network` if it does not exist. MediCore
+   reaches the database through it; see
+   [../README.md](../README.md#prerequisites-and-network-setup).
+3. Checks whether the container `medinexus-postgres` exists.
    - **Exists:** checks its image, volume mount and port binding. If any of
      them differ, the script stops, explains the conflict and changes nothing.
-     If they match, it starts the container if it is stopped or reuses it if it
-     is already running.
+     If they match, it attaches the container to `medinexus-network` if it is
+     not attached yet (`docker network connect`, no restart, other connections
+     kept), then starts the container if it is stopped or reuses it if it is
+     already running.
    - **Does not exist:** checks that host port 5432 is free and asks for a new
      database password. It creates the volume only if it is missing, then
-     creates the container.
-3. Waits for PostgreSQL with `pg_isready`, up to 30 attempts 2 seconds apart.
-4. Prints the connection details.
+     creates the container on `medinexus-network`.
+4. Waits for PostgreSQL with `pg_isready`, up to 30 attempts 2 seconds apart.
+5. Prints the connection details.
 
 The first run downloads the `postgres:18` image, so it can take a minute.
 
