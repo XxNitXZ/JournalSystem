@@ -11,6 +11,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -43,6 +45,18 @@ class AuthenticationSessionIntegrationTest {
 
     @MockitoBean
     private AuthenticationService service;
+
+    @ParameterizedTest
+    @CsvSource({"/v3/api-docs, 200", "/v3/api-docs.yaml, 200",
+            "/v3/api-docs/swagger-config, 200", "/swagger-ui.html, 302",
+            "/swagger-ui/index.html, 200", "/swagger-ui/swagger-ui.css, 200"})
+    void documentationRemainsPublic(String path, int expectedStatus) throws Exception {
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            HttpResponse<String> response = client.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + port + path)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertThat(response.statusCode()).isEqualTo(expectedStatus);
+        }
+    }
 
     @Test
     void httpOnlyCookieSupportsSessionAndIsInvalidAfterLogout() throws Exception {

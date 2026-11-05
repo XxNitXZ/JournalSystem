@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -24,6 +25,8 @@ import org.springframework.security.web.authentication.session.SessionAuthentica
 
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.service.AuthenticationService;
+
+import jakarta.servlet.DispatcherType;
 
 @Configuration
 @EnableWebSecurity
@@ -72,9 +75,12 @@ public class SecurityConfig {
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/csrf",
-                                "/api/health", "/error", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                        .anyRequest().authenticated())
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/api/health",
+                                "/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/auth/me").authenticated()
+                        .anyRequest().denyAll())
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> response.setStatus(401))
                         .accessDeniedHandler((request, response, exception) -> response.setStatus(403)))
