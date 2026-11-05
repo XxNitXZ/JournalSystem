@@ -35,15 +35,13 @@ export interface ApiRequestOptions {
   signal?: AbortSignal
 }
 
-/**
- * Sends a GET request to `path` (starting with "/", e.g. "/api/health") and
- * returns the parsed JSON body typed as T.
- */
+
 export async function apiGet<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const url = `${API_BASE_URL}${path}`
 
   const response = await fetch(url, {
     method: 'GET',
+    credentials: 'include',
     headers: { Accept: 'application/json' },
     signal: options.signal,
   })
@@ -57,15 +55,18 @@ export async function apiGet<T>(path: string, options: ApiRequestOptions = {}): 
 
 /** Sends JSON and preserves the same HTTP and network errors as apiGet. */
 export async function apiPost<T>(path: string, body: unknown, options: ApiRequestOptions = {}): Promise<T> {
+  const csrf = await apiGet<{ token: string; headerName: string }>('/api/auth/csrf', options)
   const url = `${API_BASE_URL}${path}`
   const response = await fetch(url, {
     method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    credentials: 'include',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', [csrf.headerName]: csrf.token },
     body: JSON.stringify(body),
     signal: options.signal,
   })
   if (!response.ok) {
     throw new ApiError(response.status, response.statusText, url)
   }
+  if (response.status === 204) return undefined as T
   return (await response.json()) as T
 }

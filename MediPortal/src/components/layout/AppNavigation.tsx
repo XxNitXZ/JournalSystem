@@ -12,6 +12,9 @@ function AppNavigation() {
         <li>
           <NavLink to="/register" className="app-nav__link">Register</NavLink>
         </li>
+        <li>
+          <NavLink to="/login" className="app-nav__link">Sign in / Account</NavLink>
+        </li>
       </ul>
     </nav>
   )

@@ -14,9 +14,14 @@ test('registration sends JSON and preserves API errors', async (context) => {
     await context.test('POSTs only registration data and returns the response', async () => {
       const controller = new AbortController()
       globalThis.fetch = async (url, options) => {
+        assert.equal(options?.credentials, 'include')
+        if (url === `${API_BASE_URL}/api/auth/csrf`) {
+          assert.equal(options?.method, 'GET')
+          return new Response(JSON.stringify({ token: 'csrf-token', headerName: 'X-CSRF-TOKEN' }))
+        }
         assert.equal(url, `${API_BASE_URL}/api/auth/register`)
         assert.equal(options?.method, 'POST')
-        assert.deepEqual(options?.headers, { Accept: 'application/json', 'Content-Type': 'application/json' })
+        assert.deepEqual(options?.headers, { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': 'csrf-token' })
         assert.deepEqual(JSON.parse(String(options?.body)), request)
         assert.equal(options?.signal, controller.signal)
         return new Response(JSON.stringify(response), { status: 201 })
@@ -26,7 +31,9 @@ test('registration sends JSON and preserves API errors', async (context) => {
 
     for (const status of [400, 409, 500]) {
       await context.test(`preserves HTTP ${status} as ApiError`, async () => {
-        globalThis.fetch = async () => new Response(null, { status })
+        globalThis.fetch = async (url) => String(url).endsWith('/csrf')
+          ? new Response(JSON.stringify({ token: 'csrf-token', headerName: 'X-CSRF-TOKEN' }))
+          : new Response(null, { status })
         await assert.rejects(registerUser(request), (error: unknown) => {
           assert.ok(error instanceof ApiError)
           assert.equal((error as { status: number }).status, status)

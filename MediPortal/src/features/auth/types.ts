@@ -7,8 +7,15 @@ export interface RegistrationRequest {
   role: Role
 }
 
-export interface RegistrationResponse {
+export interface UserDto {
   id: number
   email: string
   role: Role
+}
+
+export type RegistrationResponse = UserDto
+
+export interface LoginRequest {
+  email: string
+  password: string
 }
