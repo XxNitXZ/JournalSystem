@@ -124,29 +124,134 @@ MediCore's script additionally:
 
 - checks that `medinexus-postgres` is running, attached to `medinexus-network`
   and accepting connections,
-- on first creation, asks for the database username (default `medinexus`) and
-  password and **tests the login** (`SELECT 1`) before creating the container,
-  so a typo does not leave a broken container behind,
+- on first creation, takes `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` from
+  your session, the root [`.env` file](#the-env-file-database-settings-for-medicore)
+  or a prompt, and **tests the login** (`SELECT 1`) before creating the
+  container, so a wrong password does not leave a broken container behind,
 - waits until `http://127.0.0.1:8080/actuator/health` reports `UP` (application
   and database), and shows the last log lines if startup fails.
 
 MediPortal's script additionally waits until Nginx serves the page and warns if
 MediCore is not running.
 
+## The .env file (database settings for MediCore)
+
+To avoid typing the database password every time MediCore's container is
+created, put the settings in a `.env` file in the **project root**.
+
+### Creating it
+
+Copy the committed template and replace the placeholder with your real
+database password, the one you chose when `start-postgres` first created the
+database:
+
+```powershell
+Copy-Item .env.example .env      # Windows
+notepad .env
+```
+
+```bash
+cp .env.example .env             # macOS
+open -e .env
+```
+
+```dotenv
+# MediNexus Docker Environment
+
+DB_URL=jdbc:postgresql://medinexus-postgres:5432/medinexus_db
+DB_USERNAME=medinexus
+DB_PASSWORD=your-real-local-password
+```
+
+### How the scripts load it
+
+Only `start-medicore.ps1` / `start-medicore.sh` read `.env`, and only when they
+**create** the MediCore container. Both scripts behave the same:
+
+- The file is read as **plain data**: one `NAME=value` per line. Blank lines and
+  lines starting with `#` are ignored. An optional `export ` prefix and one pair
+  of surrounding quotes (`"..."` or `'...'`) are removed. Nothing is executed
+  or expanded, so `$`, backticks or `$(...)` in a password are taken literally.
+  Quote a password that starts or ends with spaces.
+- Only `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` are used; other names are
+  ignored.
+- The values exist only inside the running script. They are not set as Windows
+  or macOS environment variables. They are handed to `docker run` for that one
+  command and then removed.
+
+**Precedence** (first non-empty value wins):
+
+| Setting | 1. Session | 2. `.env` | 3. Fallback |
+|---------|------------|-----------|-------------|
+| `DB_URL` | `$env:DB_URL` / exported `DB_URL` | `DB_URL=` | `jdbc:postgresql://medinexus-postgres:5432/medinexus_db` |
+| `DB_USERNAME` | `$env:DB_USERNAME` / exported `DB_USERNAME` | `DB_USERNAME=` | prompt (default `medinexus`), or `medinexus` when not interactive |
+| `DB_PASSWORD` | `$env:DB_PASSWORD` / exported `DB_PASSWORD` | `DB_PASSWORD=` | hidden prompt |
+
+Checks before anything is created:
+
+- `DB_URL` must be exactly
+  `jdbc:postgresql://medinexus-postgres:5432/medinexus_db`. Inside Docker,
+  MediCore reaches PostgreSQL by its container name on `medinexus-network`;
+  `127.0.0.1` or `localhost` would mean the MediCore container itself. A
+  different value stops the script with an explanation.
+- `DB_PASSWORD=CHANGE_ME` (the placeholder from `.env.example`) is rejected.
+- The login is tested against PostgreSQL. A wrong password stops the script and
+  nothing is created.
+
+The scripts **never change the password stored in PostgreSQL**; `.env` must
+contain the password the database already has.
+
+### Never commit real credentials
+
+`.env` is listed in `.gitignore` and excluded from both Docker build contexts,
+so it is neither committed nor copied into an image. Only `.env.example`, with
+the placeholder, belongs in Git. Anything that has been pushed to GitHub must
+be treated as public, even after deleting it again. Each developer keeps their
+own `.env` with their own local password.
+
+### Editing .env does not update an existing container
+
+Docker copies `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` into the container's
+configuration when the container is **created**. Starting or reusing a
+container does not read `.env` again (the script says so). After changing
+`.env`, for example after changing the database password, recreate the MediCore
+container (no data is lost):
+
+```bash
+docker stop medinexus-medicore
+docker rm medinexus-medicore
+```
+
+Then run `start-medicore.ps1` / `start-medicore.sh` again.
+
+### Docker vs. IntelliJ / `mvnw spring-boot:run`
+
+These are two different ways to run MediCore, with different values:
+
+| | MediCore in Docker | MediCore in IntelliJ or with `mvnw spring-boot:run` |
+|---|---|---|
+| Configured by | root `.env` (read by `start-medicore`) | the IntelliJ run configuration, or `$env:`/`export` in the terminal ([database/README.md](database/README.md#connecting-medicore-spring-boot)) |
+| `DB_URL` | `jdbc:postgresql://medinexus-postgres:5432/medinexus_db` (container name, inside the Docker network) | `jdbc:postgresql://127.0.0.1:5432/medinexus_db` (the published port on your machine) |
+
+Spring Boot does not read `.env` itself, and IntelliJ does not use it. If a
+terminal still has the local `DB_URL` from a `mvnw` run, it takes precedence
+over `.env` and the Docker script stops. Remove it for that terminal
+(`Remove-Item Env:DB_URL` / `unset DB_URL`) or open a new terminal. Both ways
+cannot use port 8080 at the same time.
+
 ## Environment variables
 
 | Variable | Used by | When | Value |
 |----------|---------|------|-------|
-| `DB_URL` | MediCore container | set by the script on creation | `jdbc:postgresql://medinexus-postgres:5432/medinexus_db` |
-| `DB_USERNAME` | MediCore container | on creation | prompted (default `medinexus`), or taken from the current session |
-| `DB_PASSWORD` | MediCore container | on creation | prompted with hidden input, or taken from the current session |
-| `VITE_API_BASE_URL` | MediPortal image | **at image build time** | default `http://localhost:8080` |
+| `DB_URL` | MediCore container | on creation | session, `.env` or default; must be `jdbc:postgresql://medinexus-postgres:5432/medinexus_db` |
+| `DB_USERNAME` | MediCore container | on creation | session, `.env`, or prompt (default `medinexus`) |
+| `DB_PASSWORD` | MediCore container | on creation | session, `.env`, or hidden prompt; never `CHANGE_ME` |
+| `VITE_API_BASE_URL` | MediPortal image | **at image build time** | default `http://localhost:8080`; not read from `.env` |
 | `MEDINEXUS_CORS_ALLOWED_ORIGINS` | MediCore | optional | not set: MediCore allows `http://localhost:5173` |
 
-- Any `DB_URL` in your session (for example `127.0.0.1:5432` for
-  `mvnw spring-boot:run`) is **ignored** by the script. Inside a container,
-  `127.0.0.1` is the container itself, so the script always uses the
-  container name.
+- MediPortal never receives database credentials. Its only setting,
+  `VITE_API_BASE_URL`, is **public**: it is compiled into JavaScript that every
+  browser downloads.
 - The password is passed to `docker` through its process environment
   (`--env DB_PASSWORD` without a value). It never appears on the command line,
   in script output or in the image.
@@ -215,8 +320,9 @@ docker stop medinexus-medicore
 docker rm medinexus-medicore
 ```
 
-Then run `start-medicore.ps1` / `start-medicore.sh` again. It asks for the
-database password again, because the old container's settings are gone.
+Then run `start-medicore.ps1` / `start-medicore.sh` again. It reads the
+database settings from `.env` again, or asks for them if there is no `.env`,
+because the old container's settings are gone.
 
 ### MediPortal (frontend)
 
@@ -266,9 +372,27 @@ attaches the database. Then run the other script again.
 
 ### "PostgreSQL rejected the username or password"
 
-The password must be the one chosen when the database was first created. Nothing
-was created; run the script again. See
+The password must be the one chosen when the database was first created. Check
+`DB_PASSWORD` in `.env` and in your session (the session wins). Nothing was
+created; run the script again. See
 [database/README.md](database/README.md#changing-the-password) to change it.
+
+### "DB_PASSWORD from .env is still the placeholder 'CHANGE_ME'"
+
+`.env` was copied from `.env.example` but not edited. Replace `CHANGE_ME` with
+your real database password.
+
+### "DB_URL from ... is '...', but inside Docker MediCore must use ..."
+
+Usually a terminal that still has `DB_URL=jdbc:postgresql://127.0.0.1:5432/...`
+from running MediCore with `mvnw`. Run `Remove-Item Env:DB_URL` (Windows) or
+`unset DB_URL` (macOS), or open a new terminal. Otherwise correct `DB_URL` in
+`.env`.
+
+### "Line N of ... .env is not in the form NAME=value"
+
+Every non-empty line that does not start with `#` must look like `NAME=value`.
+The message shows only the line number, never the content.
 
 ### MediCore does not report UP / the container stops
 
