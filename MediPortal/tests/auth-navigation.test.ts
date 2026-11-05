@@ -34,7 +34,7 @@ test('shared authentication drives patient navigation and routes', async (contex
       })
     }
 
-    for (const page of ['doctor', 'staff']) {
+    for (const page of ['patient', 'doctor', 'staff']) {
       await context.test(`${page} handles loading, anonymous, and session error states`, () => {
         const user = { ...patient, role: page.toUpperCase() }
         const loading = renderRoute({ ...state, user, loading: true }, `/${page}`)
@@ -42,7 +42,8 @@ test('shared authentication drives patient navigation and routes', async (contex
         assert.ok(!loading.includes(`href="/${page}"`))
         assert.doesNotMatch(loading, /will be implemented later/)
         const anonymous = renderRoute(state, `/${page}`)
-        assert.ok(anonymous.includes(`sign in</a> to access the ${page} page`))
+        // Navigate redirects after mounting; server rendering must already hide the child.
+        assert.doesNotMatch(anonymous, /Welcome,|accounts only|Checking your session/)
         assert.ok(!anonymous.includes(`href="/${page}"`))
         assert.doesNotMatch(anonymous, /will be implemented later/)
         const failed = renderRoute({ ...state, user, error: 'Session unavailable.' }, `/${page}`)
@@ -67,9 +68,9 @@ test('shared authentication drives patient navigation and routes', async (contex
       assert.match(html, /Patient information and messaging will be implemented later/)
     })
 
-    await context.test('anonymous users see a sign-in link without patient navigation', () => {
+    await context.test('anonymous users cannot render patient content before redirecting', () => {
       const html = renderRoute(state)
-      assert.match(html, /sign in<\/a> to access the patient page/)
+      assert.doesNotMatch(html, /Welcome,|accounts only/)
       assert.doesNotMatch(html, /href="\/patient"/)
       assert.doesNotMatch(html, /Patient information and messaging/)
     })
