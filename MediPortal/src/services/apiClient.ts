@@ -54,3 +54,18 @@ export async function apiGet<T>(path: string, options: ApiRequestOptions = {}): 
 
   return (await response.json()) as T
 }
+
+/** Sends JSON and preserves the same HTTP and network errors as apiGet. */
+export async function apiPost<T>(path: string, body: unknown, options: ApiRequestOptions = {}): Promise<T> {
+  const url = `${API_BASE_URL}${path}`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: options.signal,
+  })
+  if (!response.ok) {
+    throw new ApiError(response.status, response.statusText, url)
+  }
+  return (await response.json()) as T
+}

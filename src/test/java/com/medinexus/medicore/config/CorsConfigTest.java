@@ -46,13 +46,13 @@ class CorsConfigTest {
     }
 
     @Test
-    void preflightFromAllowedOriginPermitsGetOnly() throws Exception {
+    void preflightFromAllowedOriginPermitsGetAndPost() throws Exception {
         mockMvc.perform(options("/api/health")
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                         .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET"))
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, ALLOWED_ORIGIN))
-                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, "GET"))
+                .andExpect(header().string("Access-Control-Allow-Methods", "GET,POST"))
                 .andExpect(header().doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS));
 
         mockMvc.perform(options("/api/health")
@@ -60,6 +60,24 @@ class CorsConfigTest {
                         .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "DELETE"))
                 .andExpect(status().isForbidden())
                 .andExpect(header().doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
+    }
+
+    @Test
+    void preflightFromAllowedOriginPermitsPost() throws Exception {
+        mockMvc.perform(options("/api/auth/register")
+                        .header("Origin", "http://localhost:5173")
+                        .header("Access-Control-Request-Method", "POST")
+                        .header("Access-Control-Request-Headers", "content-type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        "Access-Control-Allow-Origin",
+                        "http://localhost:5173"))
+                .andExpect(header().string(
+                        "Access-Control-Allow-Methods",
+                        "GET,POST"))
+                .andExpect(header().string(
+                        "Access-Control-Allow-Headers",
+                        "content-type"));
     }
 
     @Test
