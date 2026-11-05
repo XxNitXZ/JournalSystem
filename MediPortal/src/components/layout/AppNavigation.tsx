@@ -20,9 +20,9 @@ function AppNavigation() {
             Home
           </NavLink>
         </li>
-        <li>
-          <NavLink to="/register" className="app-nav__link">Register</NavLink>
-        </li>
+        {!loading && !error && !user && (
+          <li><NavLink to="/register" className="app-nav__link">Register</NavLink></li>
+        )}
         <li>
           <NavLink to="/login" className="app-nav__link">Sign in / Account</NavLink>
         </li>

@@ -15,6 +15,34 @@ test('shared authentication drives patient navigation and routes', async (contex
     }
     const patient = { id: 42, email: 'patient@example.com', role: 'PATIENT' }
 
+    await context.test('anonymous users can navigate to registration and render its form', () => {
+      const html = renderRoute(state, '/register')
+      assert.match(html, /href="\/register"/)
+      assert.match(html, /Registration details/)
+      assert.match(html, /Create an account/)
+    })
+
+    await context.test('authenticated users cannot see Register or render its form', () => {
+      for (const role of ['PATIENT', 'DOCTOR', 'STAFF']) {
+        const html = renderRoute({ ...state, user: { ...patient, role } }, '/register')
+        assert.doesNotMatch(html, /href="\/register"/)
+        assert.doesNotMatch(html, /Registration details|Create an account/)
+        assert.ok(html.includes(`href="/${role.toLowerCase()}"`))
+      }
+    })
+
+    await context.test('registration waits for session restoration and blocks session errors', () => {
+      for (const user of [null, patient]) {
+        const loading = renderRoute({ ...state, user, loading: true }, '/register')
+        assert.match(loading, /Checking your session/)
+        assert.doesNotMatch(loading, /href="\/register"|Registration details/)
+        const failed = renderRoute({ ...state, user, error: 'Session unavailable.' }, '/register')
+        assert.match(failed, /role="alert"/)
+        assert.match(failed, /Session unavailable/)
+        assert.doesNotMatch(failed, /href="\/register"|Registration details/)
+      }
+    })
+
     for (const role of ['PATIENT', 'DOCTOR', 'STAFF']) {
       const page = role.toLowerCase()
       const title = page[0].toUpperCase() + page.slice(1) + ' home'

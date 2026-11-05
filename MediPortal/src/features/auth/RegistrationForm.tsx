@@ -1,10 +1,13 @@
 import { useRef, useState, type SubmitEvent } from 'react'
+import { Link, Navigate } from 'react-router'
+import { useAuth } from './AuthContext.ts'
 import { registrationErrorMessage } from './registrationErrorMessage.ts'
 import { registerUser } from './registrationService.ts'
 import { roles, type Role } from './types.ts'
 import { validateRegistration } from './validation.ts'
 
 function RegistrationForm() {
+  const { user, loading, error: sessionError } = useAuth()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -37,6 +40,10 @@ function RegistrationForm() {
       setPending(false)
     }
   }
+
+  if (loading) return <p role="status">Checking your session…</p>
+  if (sessionError) return <p role="alert">{sessionError} <Link to="/login">Sign in</Link></p>
+  if (user) return <Navigate to={`/${user.role.toLowerCase()}`} replace />
 
   return (
     <section className="page" aria-labelledby="register-title">
