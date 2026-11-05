@@ -1,26 +1,13 @@
-import { useEffect, useRef, useState, type SubmitEvent } from 'react'
-import { getCurrentUser, login, logout } from './authenticationService.ts'
+import { useRef, useState, type SubmitEvent } from 'react'
+import { useAuth } from './AuthContext.ts'
 import { loginErrorMessage } from './loginErrorMessage.ts'
-import type { UserDto } from './types.ts'
 
 function LoginForm() {
-  const [user, setUser] = useState<UserDto | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { user, loading, error: sessionError, signIn, signOut: logout } = useAuth()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const submitting = useRef(false)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    getCurrentUser({ signal: controller.signal })
-      .then((current) => { if (!controller.signal.aborted) setUser(current) })
-      .catch(() => {
-        if (!controller.signal.aborted) setError('Unable to check your session. Please try signing in.')
-      })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
-    return () => controller.abort()
-  }, [])
 
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -38,9 +25,8 @@ function LoginForm() {
     submitting.current = true
     setPending(true)
     try {
-      const authenticated = await login({ email, password })
+      await signIn({ email, password })
       form.reset()
-      setUser(authenticated)
       setMessage('You are signed in.')
     } catch (failure: unknown) {
       setError(loginErrorMessage(failure))
@@ -58,7 +44,6 @@ function LoginForm() {
     setMessage('')
     try {
       await logout()
-      setUser(null)
       setMessage('You are signed out.')
     } catch {
       setError('Unable to confirm logout. Please try again.')
@@ -91,7 +76,7 @@ function LoginForm() {
           </fieldset>
         </form>
       )}
-      <p role="alert" className="registration-error">{error}</p>
+      <p role="alert" className="registration-error">{error || sessionError}</p>
       <p role="status">{message}</p>
     </section>
   )
