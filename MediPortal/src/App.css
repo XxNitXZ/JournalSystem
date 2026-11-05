@@ -1,5 +1,55 @@
 /* Application shell: layout, header, navigation and page content. */
 
+.registration-form {
+  max-width: 30rem;
+  margin-bottom: var(--space-4);
+}
+
+.registration-form fieldset {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.registration-form label,
+.registration-form legend {
+  font-weight: 600;
+}
+
+.registration-form input,
+.registration-form select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--space-2);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.registration-form button {
+  justify-content: center;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.registration-form :disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.registration-error {
+  color: var(--color-danger);
+}
+
 .app-layout {
   display: flex;
   flex-direction: column;
