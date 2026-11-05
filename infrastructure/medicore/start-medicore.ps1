@@ -8,9 +8,11 @@
 
       * Image missing     -> builds medinexus-medicore:local from
                              infrastructure/medicore/Dockerfile.
-      * No container yet  -> checks port 8080, reads the database username and
-                             password, verifies them against PostgreSQL and
-                             creates the container.
+      * No container yet  -> checks port 8080, determines DB_URL, DB_USERNAME
+                             and DB_PASSWORD (session variables, then the
+                             root .env file, then a prompt), verifies the
+                             login against PostgreSQL and creates the
+                             container.
       * Container stopped -> checks port 8080 and starts it.
       * Container running -> reuses it.
 
@@ -52,7 +54,10 @@ $ReadyMaxAttempts  = 60
 $ReadyDelaySeconds = 2
 $PasswordAttempts  = 3
 
+$PasswordPlaceholder = 'CHANGE_ME'
+
 $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$EnvFile    = Join-Path $RepoRoot '.env'
 $Dockerfile = Join-Path $RepoRoot 'infrastructure\medicore\Dockerfile'
 $HealthUrl  = "http://${HostAddress}:${HostPort}/actuator/health"
 
@@ -367,12 +372,94 @@ function ConvertTo-PlainText([System.Security.SecureString]$Secure) {
     }
 }
 
-# Uses DB_USERNAME / DB_PASSWORD from this session if set, otherwise asks.
+# Reads DB_URL, DB_USERNAME and DB_PASSWORD from the root .env file as plain
+# data: the file is never executed or expanded. Format: NAME=value per line;
+# blank lines and lines starting with # are ignored; an optional "export "
+# prefix and one pair of surrounding quotes ('...' or "...") are removed.
+# Other names are ignored. Returns an empty table if the file does not exist.
+# Error messages never include values, only line numbers.
+function Read-EnvFile([string]$Path) {
+    $values = @{}
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $values
+    }
+
+    $lines = @(Get-Content -LiteralPath $Path -Encoding UTF8)
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        $line = ([string]$lines[$index]).Trim().TrimStart([char]0xFEFF)
+        if ($line -eq '' -or $line.StartsWith('#')) {
+            continue
+        }
+        if ($line.StartsWith('export ')) {
+            $line = $line.Substring(7).TrimStart()
+        }
+
+        $separator = $line.IndexOf('=')
+        $name = if ($separator -gt 0) { $line.Substring(0, $separator).Trim() } else { '' }
+        if ($name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
+            Stop-WithError "Line $($index + 1) of $Path is not in the form NAME=value."
+        }
+
+        $value = $line.Substring($separator + 1).Trim()
+        if ($value.Length -ge 2 -and $value[0] -eq $value[$value.Length - 1] -and ($value[0] -eq '"' -or $value[0] -eq "'")) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+        if (@('DB_URL', 'DB_USERNAME', 'DB_PASSWORD') -contains $name) {
+            $values[$name] = $value
+        }
+    }
+    return $values
+}
+
+# Precedence: a non-empty variable of this PowerShell session wins over .env.
+# Returns $null if neither provides a value.
+function Select-Setting([string]$Name, [hashtable]$FromFile) {
+    $sessionValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($sessionValue)) {
+        return [pscustomobject]@{ Value = $sessionValue; Source = 'this PowerShell session' }
+    }
+    if ($FromFile.ContainsKey($Name) -and -not [string]::IsNullOrWhiteSpace($FromFile[$Name])) {
+        return [pscustomobject]@{ Value = $FromFile[$Name]; Source = '.env' }
+    }
+    return $null
+}
+
+function Test-PlaceholderPassword([string]$Password) {
+    return ($Password.Trim() -ceq $PasswordPlaceholder)
+}
+
+# Determines DB_URL, DB_USERNAME and DB_PASSWORD for a NEW container:
+#   1. variables of this PowerShell session,
+#   2. the root .env file,
+#   3. default (DB_URL, DB_USERNAME when non-interactive) or a prompt.
 # The password prompt hides the input; the password is never printed.
-function Read-DatabaseCredentials {
-    $user = $env:DB_USERNAME
-    if (-not [string]::IsNullOrWhiteSpace($user)) {
-        Write-Info "Using DB_USERNAME '$user' from this PowerShell session."
+function Resolve-DatabaseSettings {
+    $fromFile = Read-EnvFile $EnvFile
+    if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
+        Write-Info "Reading database settings from $EnvFile (variables of this session take precedence)."
+    }
+    else {
+        Write-Info "No .env file at $EnvFile; using this session's variables or asking."
+    }
+
+    # DB_URL must point to the PostgreSQL container on the Docker network.
+    $url = Select-Setting 'DB_URL' $fromFile
+    if ($null -eq $url) {
+        $url = [pscustomobject]@{ Value = $DbUrl; Source = 'default' }
+    }
+    if ($url.Value.Trim() -ne $DbUrl) {
+        Stop-WithError ("DB_URL from $($url.Source) is '$($url.Value)', but inside Docker MediCore must use:`n" +
+            "         $DbUrl`n" +
+            "       '$PostgresContainer' is the database container on '$NetworkName'; 127.0.0.1 or localhost`n" +
+            "       would point to the MediCore container itself. Fix DB_URL in .env, or remove it from this`n" +
+            "       session if it was set for running MediCore outside Docker: Remove-Item Env:DB_URL")
+    }
+    Write-Info "DB_URL: $DbUrl (from $($url.Source))."
+
+    $userSetting = Select-Setting 'DB_USERNAME' $fromFile
+    if ($null -ne $userSetting) {
+        $user = $userSetting.Value.Trim()
+        Write-Info "DB_USERNAME: '$user' (from $($userSetting.Source))."
     }
     else {
         try {
@@ -381,15 +468,22 @@ function Read-DatabaseCredentials {
         catch {
             # Non-interactive session: fall back to the default username.
             $user = $null
+            Write-Info "Using the default database username '$DefaultDbUser'."
         }
         if ([string]::IsNullOrWhiteSpace($user)) {
             $user = $DefaultDbUser
         }
+        $user = $user.Trim()
     }
 
-    $password = $env:DB_PASSWORD
-    if (-not [string]::IsNullOrEmpty($password)) {
-        Write-Info 'Using DB_PASSWORD from this PowerShell session.'
+    $passwordSetting = Select-Setting 'DB_PASSWORD' $fromFile
+    if ($null -ne $passwordSetting) {
+        if (Test-PlaceholderPassword $passwordSetting.Value) {
+            Stop-WithError ("DB_PASSWORD from $($passwordSetting.Source) is still the placeholder '$PasswordPlaceholder'. Nothing was created.`n" +
+                "       Put your real database password in .env (the one chosen when the database was first created).")
+        }
+        $password = $passwordSetting.Value
+        Write-Info "DB_PASSWORD: set (from $($passwordSetting.Source); not shown)."
     }
     else {
         $password = $null
@@ -398,21 +492,35 @@ function Read-DatabaseCredentials {
                 $secure = Read-Host -Prompt "Password for database user '$user'" -AsSecureString
             }
             catch {
-                Stop-WithError 'The database password is required. Run this script in an interactive PowerShell window.'
+                Stop-WithError ('The database password is required. Put it in .env (see .env.example) ' +
+                    'or run this script in an interactive PowerShell window.')
             }
             $entered = ConvertTo-PlainText $secure
-            if (-not [string]::IsNullOrWhiteSpace($entered)) {
-                $password = $entered
-                break
+            if ([string]::IsNullOrWhiteSpace($entered)) {
+                Write-Warn 'The password must not be empty.'
+                continue
             }
-            Write-Warn 'The password must not be empty.'
+            if (Test-PlaceholderPassword $entered) {
+                Write-Warn "'$PasswordPlaceholder' is a placeholder, not a password."
+                continue
+            }
+            $password = $entered
+            break
         }
         if ($null -eq $password) {
             Stop-WithError "No password entered after $PasswordAttempts attempts. Nothing was created."
         }
     }
 
-    [pscustomobject]@{ User = $user.Trim(); Password = $password }
+    [pscustomobject]@{ User = $user; Password = $password }
+}
+
+# .env is only used when the container is created: say so when reusing one.
+function Write-EnvFileNotice {
+    if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
+        Write-Info ("The existing container keeps the settings it was created with; .env is only read when " +
+            "the container is created (see infrastructure/README.md).")
+    }
 }
 
 # Logs in to PostgreSQL once (SELECT 1) so a wrong password is reported now,
@@ -553,6 +661,7 @@ if ($null -ne $containerState) {
     Write-Info "Container '$ContainerName' already exists (state: $containerState)."
     Assert-ContainerConfiguration
     Write-OutdatedImageWarning
+    Write-EnvFileNotice
 
     switch ($containerState) {
         'running' {
@@ -574,7 +683,7 @@ if ($null -ne $containerState) {
 else {
     Write-Info "Container '$ContainerName' does not exist yet."
     Assert-PortFree
-    $credentials = Read-DatabaseCredentials
+    $credentials = Resolve-DatabaseSettings
     Assert-DatabaseCredentials $credentials
     New-MediCoreContainer $credentials
     $credentials = $null

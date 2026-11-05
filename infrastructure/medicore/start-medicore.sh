@@ -6,9 +6,10 @@
 #
 #   * Image missing     -> builds medinexus-medicore:local from
 #                          infrastructure/medicore/Dockerfile.
-#   * No container yet  -> checks port 8080, reads the database username and
-#                          password, verifies them against PostgreSQL and
-#                          creates the container.
+#   * No container yet  -> checks port 8080, determines DB_URL, DB_USERNAME
+#                          and DB_PASSWORD (shell variables, then the root
+#                          .env file, then a prompt), verifies the login
+#                          against PostgreSQL and creates the container.
 #   * Container stopped -> checks port 8080 and starts it.
 #   * Container running -> reuses it.
 #
@@ -46,12 +47,14 @@ readonly CONTAINER_PORT='8080'
 readonly READY_MAX_ATTEMPTS=60
 readonly READY_DELAY_SECONDS=2
 readonly PASSWORD_ATTEMPTS=3
+readonly PASSWORD_PLACEHOLDER='CHANGE_ME'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 readonly SCRIPT_DIR REPO_ROOT
 readonly DOCKERFILE="${REPO_ROOT}/infrastructure/medicore/Dockerfile"
 readonly HEALTH_URL="http://${HOST_ADDRESS}:${HOST_PORT}/actuator/health"
+readonly ENV_FILE="${REPO_ROOT}/.env"
 
 # Go templates used with "docker inspect" (identical in both scripts). The env
 # templates only ever return variable NAMES or DB_URL, never DB_PASSWORD.
@@ -295,33 +298,136 @@ ${conflicts}
 # ---------------------------------------------------------------------------
 CREDENTIAL_USER=''
 CREDENTIAL_PASSWORD=''
+ENV_FILE_DB_URL=''
+ENV_FILE_DB_USERNAME=''
+ENV_FILE_DB_PASSWORD=''
 
-# Uses DB_USERNAME / DB_PASSWORD from this shell if exported, otherwise asks.
+# Removes leading and trailing whitespace.
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+# Reads DB_URL, DB_USERNAME and DB_PASSWORD from the root .env file as plain
+# data: the file is never sourced, executed or expanded. Format: NAME=value per
+# line; blank lines and lines starting with # are ignored; an optional
+# "export " prefix and one pair of surrounding quotes ('...' or "...") are
+# removed. Other names are ignored. Stores the values in ENV_FILE_*.
+# Error messages never include values, only line numbers.
+load_env_file() {
+  [ -f "$ENV_FILE" ] || return 0
+
+  local line name value line_number=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line_number=$((line_number + 1))
+    line="${line%$'\r'}"
+    if [ "$line_number" -eq 1 ]; then
+      line="${line#$'\xef\xbb\xbf'}"
+    fi
+    line="$(trim "$line")"
+    case "$line" in
+      ''|'#'*) continue ;;
+      'export '*) line="$(trim "${line#export }")" ;;
+    esac
+
+    case "$line" in
+      *=*) name="$(trim "${line%%=*}")" ;;
+      *) name='' ;;
+    esac
+    case "$name" in
+      ''|[0-9]*|*[!A-Za-z0-9_]*) fail "Line ${line_number} of ${ENV_FILE} is not in the form NAME=value." ;;
+    esac
+
+    value="$(trim "${line#*=}")"
+    case "$value" in
+      \"*\"|\'*\')
+        if [ "${#value}" -ge 2 ]; then
+          value="${value#?}"
+          value="${value%?}"
+        fi ;;
+    esac
+
+    case "$name" in
+      DB_URL) ENV_FILE_DB_URL="$value" ;;
+      DB_USERNAME) ENV_FILE_DB_USERNAME="$value" ;;
+      DB_PASSWORD) ENV_FILE_DB_PASSWORD="$value" ;;
+    esac
+  done < "$ENV_FILE"
+}
+
+is_placeholder_password() {
+  [ "$(trim "$1")" = "$PASSWORD_PLACEHOLDER" ]
+}
+
+# Determines DB_URL, DB_USERNAME and DB_PASSWORD for a NEW container:
+#   1. variables exported in this shell,
+#   2. the root .env file,
+#   3. default (DB_URL, DB_USERNAME when non-interactive) or a prompt.
 # Stores the result in CREDENTIAL_* (no subshell, so nothing leaks via stdout).
-read_database_credentials() {
-  if [ -n "${DB_USERNAME:-}" ]; then
-    CREDENTIAL_USER="$DB_USERNAME"
-    info "Using DB_USERNAME '${CREDENTIAL_USER}' from this shell."
+resolve_database_settings() {
+  load_env_file
+  if [ -f "$ENV_FILE" ]; then
+    info "Reading database settings from ${ENV_FILE} (variables of this shell take precedence)."
+  else
+    info "No .env file at ${ENV_FILE}; using this shell's variables or asking."
+  fi
+
+  # DB_URL must point to the PostgreSQL container on the Docker network.
+  local url url_source
+  if [ -n "$(trim "${DB_URL:-}")" ]; then
+    url="$DB_URL"; url_source='this shell'
+  elif [ -n "$ENV_FILE_DB_URL" ]; then
+    url="$ENV_FILE_DB_URL"; url_source='.env'
+  else
+    url="$DB_URL_VALUE"; url_source='default'
+  fi
+  if [ "$(trim "$url")" != "$DB_URL_VALUE" ]; then
+    fail "DB_URL from ${url_source} is '${url}', but inside Docker MediCore must use:
+         ${DB_URL_VALUE}
+       '${POSTGRES_CONTAINER}' is the database container on '${NETWORK_NAME}'; 127.0.0.1 or localhost
+       would point to the MediCore container itself. Fix DB_URL in .env, or remove it from this
+       shell if it was set for running MediCore outside Docker: unset DB_URL"
+  fi
+  info "DB_URL: ${DB_URL_VALUE} (from ${url_source})."
+
+  if [ -n "$(trim "${DB_USERNAME:-}")" ]; then
+    CREDENTIAL_USER="$(trim "$DB_USERNAME")"
+    info "DB_USERNAME: '${CREDENTIAL_USER}' (from this shell)."
+  elif [ -n "$ENV_FILE_DB_USERNAME" ]; then
+    CREDENTIAL_USER="$ENV_FILE_DB_USERNAME"
+    info "DB_USERNAME: '${CREDENTIAL_USER}' (from .env)."
   elif [ ! -t 0 ]; then
     CREDENTIAL_USER="$DEFAULT_DB_USER"
     info "Using the default database username '${CREDENTIAL_USER}'."
   else
     printf 'Database username [%s]: ' "$DEFAULT_DB_USER" >&2
     IFS= read -r CREDENTIAL_USER || fail 'Could not read the username.'
-    CREDENTIAL_USER="$(printf '%s' "$CREDENTIAL_USER" | tr -d '[:space:]')"
+    CREDENTIAL_USER="$(trim "$CREDENTIAL_USER")"
     if [ -z "$CREDENTIAL_USER" ]; then
       CREDENTIAL_USER="$DEFAULT_DB_USER"
     fi
   fi
 
-  if [ -n "${DB_PASSWORD:-}" ]; then
-    CREDENTIAL_PASSWORD="$DB_PASSWORD"
-    info 'Using DB_PASSWORD from this shell.'
+  local password_source=''
+  if [ -n "$(trim "${DB_PASSWORD:-}")" ]; then
+    CREDENTIAL_PASSWORD="$DB_PASSWORD"; password_source='this shell'
+  elif [ -n "$ENV_FILE_DB_PASSWORD" ]; then
+    CREDENTIAL_PASSWORD="$ENV_FILE_DB_PASSWORD"; password_source='.env'
+  fi
+  if [ -n "$password_source" ]; then
+    if is_placeholder_password "$CREDENTIAL_PASSWORD"; then
+      CREDENTIAL_PASSWORD=''
+      fail "DB_PASSWORD from ${password_source} is still the placeholder '${PASSWORD_PLACEHOLDER}'. Nothing was created.
+       Put your real database password in .env (the one chosen when the database was first created)."
+    fi
+    info "DB_PASSWORD: set (from ${password_source}; not shown)."
     return 0
   fi
 
   if [ ! -t 0 ]; then
-    fail 'The database password is required. Run this script in an interactive terminal.'
+    fail 'The database password is required. Put it in .env (see .env.example) or run this script in an interactive terminal.'
   fi
   local attempt=1 password
   while [ "$attempt" -le "$PASSWORD_ATTEMPTS" ]; do
@@ -329,13 +435,25 @@ read_database_credentials() {
     printf "Password for database user '%s': " "$CREDENTIAL_USER" >&2
     IFS= read -r -s password || fail 'Could not read the password.'
     printf '\n' >&2
-    if [ -n "${password//[[:space:]]/}" ]; then
-      CREDENTIAL_PASSWORD="$password"
-      return 0
+    if [ -z "${password//[[:space:]]/}" ]; then
+      warn 'The password must not be empty.'
+      continue
     fi
-    warn 'The password must not be empty.'
+    if is_placeholder_password "$password"; then
+      warn "'${PASSWORD_PLACEHOLDER}' is a placeholder, not a password."
+      continue
+    fi
+    CREDENTIAL_PASSWORD="$password"
+    return 0
   done
   fail "No password entered after ${PASSWORD_ATTEMPTS} attempts. Nothing was created."
+}
+
+# .env is only used when the container is created: say so when reusing one.
+env_file_notice() {
+  if [ -f "$ENV_FILE" ]; then
+    info "The existing container keeps the settings it was created with; .env is only read when the container is created (see infrastructure/README.md)."
+  fi
 }
 
 # Logs in to PostgreSQL once (SELECT 1) so a wrong password is reported now,
@@ -461,6 +579,7 @@ main() {
     info "Container '${CONTAINER_NAME}' already exists (state: ${container_state})."
     assert_container_configuration
     warn_if_outdated_image
+    env_file_notice
 
     case "$container_state" in
       running)
@@ -481,7 +600,7 @@ main() {
   else
     info "Container '${CONTAINER_NAME}' does not exist yet."
     assert_port_free
-    read_database_credentials
+    resolve_database_settings
     assert_database_credentials
     create_medicore_container
   fi
