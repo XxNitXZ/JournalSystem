@@ -5,11 +5,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.sql.SQLException;
+
+import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -18,6 +22,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.entity.User;
 import com.medinexus.medicore.auth.repository.UserRepository;
@@ -32,15 +37,21 @@ class RegistrationServiceTest {
     @ParameterizedTest
     @EnumSource(Role.class)
     void registersAccountWithExplicitRole(Role role) {
-        when(repository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.saveAndFlush(any(User.class))).thenAnswer(invocation -> {
+            User saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", 42L);
+            return saved;
+        });
 
-        User user = service.register("patient@example.com", "a secure password", role);
+        UserDto user = service.register("patient@example.com", "a secure password", role);
 
-        assertThat(user.getEmail()).isEqualTo("patient@example.com");
-        assertThat(user.getRole()).isEqualTo(role);
-        assertThat(user.getFhirPatientId()).isNull();
+        assertThat(user).isEqualTo(new UserDto(42L, "patient@example.com", role));
         verify(repository).existsByEmail("patient@example.com");
-        verify(repository).saveAndFlush(user);
+        ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
+        verify(repository).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getEmail()).isEqualTo(user.email());
+        assertThat(saved.getValue().getRole()).isEqualTo(role);
+        assertThat(saved.getValue().getFhirPatientId()).isNull();
     }
 
     @Test
@@ -61,8 +72,13 @@ class RegistrationServiceTest {
     void storesSaltedBcryptHashesInsteadOfPlaintext() {
         when(repository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User first = service.register("first@example.com", "a secure password", Role.PATIENT);
-        User second = service.register("second@example.com", "a secure password", Role.PATIENT);
+        service.register("first@example.com", "a secure password", Role.PATIENT);
+        service.register("second@example.com", "a secure password", Role.PATIENT);
+
+        ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
+        verify(repository, times(2)).saveAndFlush(saved.capture());
+        User first = saved.getAllValues().get(0);
+        User second = saved.getAllValues().get(1);
 
         assertThat(first.getPasswordHash()).startsWith("$2").isNotEqualTo("a secure password");
         assertThat(encoder.matches("a secure password", first.getPasswordHash())).isTrue();
@@ -110,9 +126,11 @@ class RegistrationServiceTest {
         when(repository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
         String password = "é".repeat(36);
 
-        User user = service.register("patient@example.com", password, Role.PATIENT);
+        service.register("patient@example.com", password, Role.PATIENT);
 
-        assertThat(encoder.matches(password, user.getPasswordHash())).isTrue();
+        ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
+        verify(repository).saveAndFlush(saved.capture());
+        assertThat(encoder.matches(password, saved.getValue().getPasswordHash())).isTrue();
     }
 
     @Test

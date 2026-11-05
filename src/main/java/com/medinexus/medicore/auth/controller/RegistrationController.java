@@ -10,8 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.medinexus.medicore.auth.dto.RegistrationRequest;
-import com.medinexus.medicore.auth.dto.RegistrationResponse;
-import com.medinexus.medicore.auth.entity.User;
+import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.service.RegistrationService;
 
 @RestController
@@ -25,9 +24,9 @@ public class RegistrationController {
     }
 
     @PostMapping("/register")
-    public ResponseEntity<RegistrationResponse> register(@RequestBody RegistrationRequest request) {
-        User user = registrationService.register(request.email(), request.password(), request.role());
-        return ResponseEntity.status(HttpStatus.CREATED).body(new RegistrationResponse(user.getId(), user.getEmail(), user.getRole()));
+    public ResponseEntity<UserDto> register(@RequestBody RegistrationRequest request) {
+        UserDto user = registrationService.register(request.email(), request.password(), request.role());
+        return ResponseEntity.status(HttpStatus.CREATED).body(user);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

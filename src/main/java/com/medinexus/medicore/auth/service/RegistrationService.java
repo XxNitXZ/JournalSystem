@@ -11,6 +11,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.entity.User;
 import com.medinexus.medicore.auth.repository.UserRepository;
@@ -30,7 +31,7 @@ public class RegistrationService {
 
     /** Creates an account with an explicit role. Callers are responsible for authorization. */
     @Transactional
-    public User register(String email, String password, Role role) {
+    public UserDto register(String email, String password, Role role) {
         if (email == null || email.length() > 255 || !EMAIL.matcher(email).matches()) {
             throw new IllegalArgumentException("A valid email address is required");
         }
@@ -52,7 +53,8 @@ public class RegistrationService {
         user.setRole(role);
         // Flush here so the database unique constraint also rejects concurrent duplicates.
         try {
-            return userRepository.saveAndFlush(user);
+            User saved = userRepository.saveAndFlush(user);
+            return new UserDto(saved.getId(), saved.getEmail(), saved.getRole());
         } catch (DataIntegrityViolationException exception) {
             for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
                 if (cause instanceof DuplicateKeyException

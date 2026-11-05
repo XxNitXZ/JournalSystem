@@ -2,7 +2,6 @@ package com.medinexus.medicore.auth.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -23,7 +22,7 @@ import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.medinexus.medicore.auth.entity.Role;
-import com.medinexus.medicore.auth.entity.User;
+import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.service.RegistrationService;
 
 @WebMvcTest(RegistrationController.class)
@@ -38,7 +37,7 @@ class RegistrationControllerTest {
     @ParameterizedTest
     @EnumSource(Role.class)
     void createsSelectedRoleAndExposesOnlyResponseFields(Role role) throws Exception {
-        User user = savedUser(role);
+        UserDto user = new UserDto(42L, "patient@example.com", role);
         when(registrationService.register("patient@example.com", "a secure password", role))
                 .thenReturn(user);
 
@@ -127,13 +126,4 @@ class RegistrationControllerTest {
                 .andExpect(content().string(""));
     }
 
-    private User savedUser(Role role) {
-        User user = mock(User.class);
-        when(user.getId()).thenReturn(42L);
-        when(user.getEmail()).thenReturn("patient@example.com");
-        when(user.getRole()).thenReturn(role);
-        when(user.getPasswordHash()).thenReturn("sensitive-hash");
-        when(user.getFhirPatientId()).thenReturn("sensitive-patient-id");
-        return user;
-    }
 }
