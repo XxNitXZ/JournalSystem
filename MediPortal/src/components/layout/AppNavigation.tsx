@@ -9,6 +9,12 @@ function AppNavigation() {
         {!loading && !error && user?.role === 'PATIENT' && (
           <li><NavLink to="/patient" className="app-nav__link">Patient home</NavLink></li>
         )}
+        {!loading && !error && user?.role === 'DOCTOR' && (
+          <li><NavLink to="/doctor" className="app-nav__link">Doctor home</NavLink></li>
+        )}
+        {!loading && !error && user?.role === 'STAFF' && (
+          <li><NavLink to="/staff" className="app-nav__link">Staff home</NavLink></li>
+        )}
         <li>
           <NavLink to="/" end className="app-nav__link">
             Home

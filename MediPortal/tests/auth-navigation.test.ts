@@ -15,6 +15,44 @@ test('shared authentication drives patient navigation and routes', async (contex
     }
     const patient = { id: 42, email: 'patient@example.com', role: 'PATIENT' }
 
+    for (const role of ['PATIENT', 'DOCTOR', 'STAFF']) {
+      const page = role.toLowerCase()
+      const title = page[0].toUpperCase() + page.slice(1) + ' home'
+      await context.test(`${role} sees only its own navigation and landing content`, () => {
+        const html = renderRoute({ ...state, user: { ...patient, role } }, `/${page}`)
+        assert.ok(html.includes(`href="/${page}"`))
+        assert.ok(html.includes(`>${title}</h1>`))
+        assert.match(html, /patient@example.com/)
+        assert.match(html, /will be implemented later/)
+        for (const other of ['patient', 'doctor', 'staff'].filter((value) => value !== page)) {
+          assert.ok(!html.includes(`href="/${other}"`))
+          const denied = renderRoute({ ...state, user: { ...patient, role } }, `/${other}`)
+          assert.ok(denied.includes(`available to ${other} accounts only`))
+          assert.doesNotMatch(denied, /will be implemented later/)
+          assert.doesNotMatch(denied, /Welcome,/)
+        }
+      })
+    }
+
+    for (const page of ['doctor', 'staff']) {
+      await context.test(`${page} handles loading, anonymous, and session error states`, () => {
+        const user = { ...patient, role: page.toUpperCase() }
+        const loading = renderRoute({ ...state, user, loading: true }, `/${page}`)
+        assert.match(loading, /Checking your session/)
+        assert.ok(!loading.includes(`href="/${page}"`))
+        assert.doesNotMatch(loading, /will be implemented later/)
+        const anonymous = renderRoute(state, `/${page}`)
+        assert.ok(anonymous.includes(`sign in</a> to access the ${page} page`))
+        assert.ok(!anonymous.includes(`href="/${page}"`))
+        assert.doesNotMatch(anonymous, /will be implemented later/)
+        const failed = renderRoute({ ...state, user, error: 'Session unavailable.' }, `/${page}`)
+        assert.match(failed, /role="alert"/)
+        assert.match(failed, /Session unavailable/)
+        assert.ok(!failed.includes(`href="/${page}"`))
+        assert.doesNotMatch(failed, /will be implemented later/)
+      })
+    }
+
     await context.test('waits for session restoration before displaying patient content', () => {
       const html = renderInitialSession()
       assert.match(html, /Checking your session/)
