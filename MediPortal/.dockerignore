@@ -1,0 +1,24 @@
+# Build context for the MediPortal image
+# (infrastructure/mediportal/Dockerfile, context: MediPortal/).
+#
+# Allow-list: only what `npm ci` and `npm run build` need.
+# node_modules/ and dist/ are rebuilt inside the image.
+*
+!package.json
+!package-lock.json
+!index.html
+!vite.config.ts
+!tsconfig*.json
+!src/
+!public/
+
+# Never send local env files or secrets. In particular, a developer's
+# .env.local must not change the API URL baked into the image; use
+# --build-arg VITE_API_BASE_URL=... instead.
+**/.env
+**/.env.*
+**/*.local
+**/*.secret
+**/*.secrets
+**/*.key
+**/*.pem
