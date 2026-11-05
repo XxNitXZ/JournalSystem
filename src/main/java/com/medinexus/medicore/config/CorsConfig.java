@@ -12,8 +12,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * during development) can call {@code /api/**}.
  *
  * <p>Only the explicitly configured origins are allowed
- * ({@code medinexus.cors.allowed-origins}); wildcards are rejected. Only GET is
- * allowed and cross-origin credentials (cookies, HTTP auth) are not.
+ * ({@code medinexus.cors.allowed-origins}); wildcards are rejected. GET and POST
+ * requests may include session cookies.
  */
 @Configuration
 public class CorsConfig implements WebMvcConfigurer {
@@ -33,6 +33,6 @@ public class CorsConfig implements WebMvcConfigurer {
         registry.addMapping("/api/**")
                 .allowedOrigins(allowedOrigins)
                 .allowedMethods("GET", "POST")
-                .allowCredentials(false);
+                .allowCredentials(true);
     }
 }

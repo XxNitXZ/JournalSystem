@@ -5,28 +5,36 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
-import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.dto.UserDto;
+import com.medinexus.medicore.auth.entity.Role;
+import com.medinexus.medicore.auth.service.AuthenticationService;
 import com.medinexus.medicore.auth.service.RegistrationService;
+import com.medinexus.medicore.config.SecurityConfig;
 
 @WebMvcTest(RegistrationController.class)
+@Import(SecurityConfig.class)
 class RegistrationControllerTest {
+
+    @MockitoBean
+    private AuthenticationService authenticationService;
 
     @Autowired
     private MockMvc mockMvc;
@@ -41,7 +49,7 @@ class RegistrationControllerTest {
         when(registrationService.register("patient@example.com", "a secure password", role))
                 .thenReturn(user);
 
-        mockMvc.perform(post("/api/auth/register")
+        mockMvc.perform(post("/api/auth/register").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"email":"patient@example.com","password":"a secure password","role":"%s"}
@@ -66,7 +74,7 @@ class RegistrationControllerTest {
         when(registrationService.register(any(), any(), eq(Role.PATIENT)))
                 .thenThrow(new IllegalArgumentException("Invalid registration data"));
 
-        mockMvc.perform(post("/api/auth/register")
+        mockMvc.perform(post("/api/auth/register").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest());
 
@@ -76,7 +84,7 @@ class RegistrationControllerTest {
     @ParameterizedTest
     @ValueSource(strings = {"", "null", "{invalid"})
     void unreadableRequestReturnsBadRequest(String body) throws Exception {
-        mockMvc.perform(post("/api/auth/register")
+        mockMvc.perform(post("/api/auth/register").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest());
 
@@ -89,7 +97,7 @@ class RegistrationControllerTest {
         when(registrationService.register("patient@example.com", "a secure password", null))
                 .thenThrow(new IllegalArgumentException("A role is required"));
 
-        mockMvc.perform(post("/api/auth/register")
+        mockMvc.perform(post("/api/auth/register").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"email":"patient@example.com","password":"a secure password"%s}
@@ -102,7 +110,7 @@ class RegistrationControllerTest {
     @ParameterizedTest
     @ValueSource(strings = {"ADMIN", "patient", ""})
     void invalidRoleReturnsBadRequestBeforeCallingService(String role) throws Exception {
-        mockMvc.perform(post("/api/auth/register")
+        mockMvc.perform(post("/api/auth/register").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"email":"patient@example.com","password":"a secure password","role":"%s"}
@@ -113,11 +121,22 @@ class RegistrationControllerTest {
     }
 
     @Test
+    void registrationRequiresCsrfToken() throws Exception {
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"patient@example.com","password":"a secure password","role":"PATIENT"}
+                                """))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(registrationService);
+    }
+
+    @Test
     void duplicateEmailReturnsConflictWithoutExposingExceptionDetails() throws Exception {
         when(registrationService.register("patient@example.com", "a secure password", Role.PATIENT))
                 .thenThrow(new DuplicateKeyException("Internal database details"));
 
-        mockMvc.perform(post("/api/auth/register")
+        mockMvc.perform(post("/api/auth/register").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"email":"patient@example.com","password":"a secure password","role":"PATIENT"}

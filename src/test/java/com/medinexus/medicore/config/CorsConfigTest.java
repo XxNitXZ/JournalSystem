@@ -9,15 +9,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.medinexus.medicore.auth.service.AuthenticationService;
 import com.medinexus.medicore.health.controller.HealthController;
 
 /** Web-layer CORS tests; no database required. */
 @WebMvcTest(HealthController.class)
+@Import(SecurityConfig.class)
 class CorsConfigTest {
+
+    @MockitoBean
+    private AuthenticationService authenticationService;
 
     private static final String ALLOWED_ORIGIN = "http://localhost:5173";
     private static final String UNRELATED_ORIGIN = "http://unrelated.example";
@@ -34,7 +41,7 @@ class CorsConfigTest {
         mockMvc.perform(get("/api/health").header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN))
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, ALLOWED_ORIGIN))
-                .andExpect(header().doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS))
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"))
                 .andExpect(content().json("{\"status\":\"UP\"}", JsonCompareMode.STRICT));
     }
 
@@ -53,7 +60,7 @@ class CorsConfigTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, ALLOWED_ORIGIN))
                 .andExpect(header().string("Access-Control-Allow-Methods", "GET,POST"))
-                .andExpect(header().doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS));
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"));
 
         mockMvc.perform(options("/api/health")
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
