@@ -1,5 +1,8 @@
 package com.medinexus.medicore.fhir.mapper;
 
+import java.net.URI;
+import java.util.Locale;
+
 import org.hl7.fhir.r4.model.BooleanType;
 import org.hl7.fhir.r4.model.CodeableConcept;
 import org.hl7.fhir.r4.model.DateTimeType;
@@ -16,6 +19,7 @@ import org.hl7.fhir.r4.model.Type;
 import org.springframework.stereotype.Component;
 
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto;
+import com.medinexus.medicore.medicalrecord.dto.CreateObservationRequest;
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto.Concept;
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto.ObservationValue;
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto.QuantityValue;
@@ -86,5 +90,58 @@ public class ObservationMapper {
                 new ObservationDto.PeriodValue(p.hasStart() ? p.getStartElement().getValueAsString() : null,
                         p.hasEnd() ? p.getEndElement().getValueAsString() : null));
         throw new IllegalArgumentException("Observation value type is not supported by this projection");
+    }
+
+    /** Validates internal create input before any external request is made. */
+    public Observation toResource(CreateObservationRequest request) {
+        if (request == null || request.patientId() == null || !request.patientId().matches("[A-Za-z0-9.-]{1,64}")
+                || request.status() == null || (request.value() == null) == (request.dataAbsentReason() == null)) {
+            throw invalid();
+        }
+        Observation observation = new Observation();
+        observation.setStatus(Observation.ObservationStatus.fromCode(
+                request.status().name().toLowerCase(Locale.ROOT).replace('_', '-')));
+        observation.setSubject(new Reference("Patient/" + request.patientId()));
+        observation.setCode(concept(request.code()));
+        if (request.value() instanceof CreateObservationRequest.QuantityValue value) {
+            if (value.value() == null || (value.system() == null) != (value.code() == null)
+                    || value.system() != null && (!absoluteUri(value.system()) || !nonblank(value.code()))) {
+                throw invalid();
+            }
+            Quantity quantity = new Quantity().setValue(value.value()).setUnit(value.unit())
+                    .setSystem(value.system()).setCode(value.code());
+            if (value.comparator() != null) quantity.setComparator(Quantity.QuantityComparator.fromCode(value.comparator().code()));
+            observation.setValue(quantity);
+        } else if (request.value() instanceof CreateObservationRequest.CodedValue value) {
+            observation.setValue(concept(value.concept()));
+        } else {
+            observation.setDataAbsentReason(concept(request.dataAbsentReason()));
+        }
+        return observation;
+    }
+
+    private CodeableConcept concept(Concept input) {
+        if (input == null || !nonblank(input.text()) && input.coding().isEmpty()) throw invalid();
+        CodeableConcept result = new CodeableConcept().setText(input.text());
+        for (var coding : input.coding()) {
+            // Creation requires explicit code systems, rather than guessing a coding's meaning.
+            if (!absoluteUri(coding.system()) || !nonblank(coding.code())) throw invalid();
+            var mapped = result.addCoding().setSystem(coding.system()).setVersion(coding.version())
+                    .setCode(coding.code()).setDisplay(coding.display());
+            if (coding.userSelected() != null) mapped.setUserSelected(coding.userSelected());
+        }
+        return result;
+    }
+
+    private boolean absoluteUri(String value) {
+        if (!nonblank(value)) return false;
+        try { return URI.create(value).isAbsolute(); }
+        catch (IllegalArgumentException exception) { return false; }
+    }
+
+    private boolean nonblank(String value) { return value != null && !value.isBlank(); }
+
+    private IllegalArgumentException invalid() {
+        return new IllegalArgumentException("Invalid Observation creation request");
     }
 }

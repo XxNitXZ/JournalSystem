@@ -14,6 +14,7 @@ import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.parser.DataFormatException;
 
 import com.medinexus.medicore.fhir.mapper.ObservationMapper;
+import com.medinexus.medicore.medicalrecord.dto.CreateObservationRequest;
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto;
 
 @Component
@@ -40,6 +41,21 @@ public class FhirObservationClient {
         }
         return requestExecutor.execute("observation-read", () -> fhirClient.read()
                 .resource(Observation.class).withId(id).execute());
+    }
+
+    /** Internal POST [base]/Observation. A failed response may follow a committed write; do not retry blindly. */
+    public String createObservation(CreateObservationRequest request) {
+        Observation resource = mapper.toResource(request);
+        return requestExecutor.execute("observation-create", () -> {
+            var outcome = fhirClient.create().resource(resource).execute();
+            var id = outcome == null ? null : outcome.getId();
+            if (outcome == null || !Boolean.TRUE.equals(outcome.getCreated()) || id == null
+                    || !"Observation".equals(id.getResourceType()) || id.getIdPart() == null
+                    || !id.getIdPart().matches("[A-Za-z0-9.-]{1,64}")) {
+                throw new DataFormatException("Observation creation response did not confirm a valid assigned ID");
+            }
+            return id.getIdPart();
+        });
     }
 
     /**
