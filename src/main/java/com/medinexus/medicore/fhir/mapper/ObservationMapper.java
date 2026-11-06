@@ -28,16 +28,26 @@ public class ObservationMapper {
         if (observation == null || !observation.hasStatus() || !observation.hasCode()) {
             throw new IllegalArgumentException("Observation status and code are required");
         }
-        if (observation.hasComponent()) {
-            throw new IllegalArgumentException("Observation components are not supported by this projection");
-        }
         if (observation.hasValue() && observation.hasDataAbsentReason()) {
             throw new IllegalArgumentException("Observation value and dataAbsentReason cannot both be present");
         }
         return new ObservationDto(observation.getIdElement().getIdPart(), observation.getStatus().toCode(),
                 observation.hasSubject() ? subject(observation.getSubject()) : null,
                 concept(observation.getCode()), observation.hasValue() ? value(observation.getValue()) : null,
-                observation.hasDataAbsentReason() ? concept(observation.getDataAbsentReason()) : null);
+                observation.hasDataAbsentReason() ? concept(observation.getDataAbsentReason()) : null,
+                observation.getComponent().stream().map(this::component).toList());
+    }
+
+    private ObservationDto.Component component(Observation.ObservationComponentComponent component) {
+        if (component == null || !component.hasCode()) {
+            throw new IllegalArgumentException("Observation component code is required");
+        }
+        if (component.hasValue() && component.hasDataAbsentReason()) {
+            throw new IllegalArgumentException("Observation component value and dataAbsentReason cannot both be present");
+        }
+        return new ObservationDto.Component(concept(component.getCode()),
+                component.hasValue() ? value(component.getValue()) : null,
+                component.hasDataAbsentReason() ? concept(component.getDataAbsentReason()) : null);
     }
 
     private ObservationDto.SubjectReference subject(Reference reference) {

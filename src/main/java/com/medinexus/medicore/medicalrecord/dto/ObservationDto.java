@@ -5,7 +5,14 @@ import java.util.List;
 
 /** A read projection, not a complete FHIR resource or clinical profile validator. */
 public record ObservationDto(String id, String status, SubjectReference subject, Concept code,
-        ObservationValue value, Concept dataAbsentReason) {
+        ObservationValue value, Concept dataAbsentReason, List<Component> components) {
+
+    public ObservationDto {
+        components = List.copyOf(components);
+    }
+
+    public record Component(Concept code, ObservationValue value, Concept dataAbsentReason) {
+    }
 
     public record SubjectReference(String reference, String type, String display, Identifier identifier) {
     }

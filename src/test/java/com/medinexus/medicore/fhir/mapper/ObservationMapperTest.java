@@ -124,12 +124,71 @@ class ObservationMapperTest {
     }
 
     @Test
-    void rejectsUnsupportedValuesComponentsAndConflictingAbsenceReason() {
+    void rejectsUnsupportedValuesAndConflictingAbsenceReason() {
         assertThatThrownBy(() -> mapper.toDto(parse(",\"valueSampledData\":{\"origin\":{\"value\":0},\"period\":1,\"dimensions\":1,\"data\":\"1 2 3\"}")))
                 .isInstanceOf(IllegalArgumentException.class).hasMessage("Observation value type is not supported by this projection");
-        assertThatThrownBy(() -> mapper.toDto(parse(",\"component\":[{\"code\":{\"text\":\"Synthetic\"},\"valueInteger\":1}]")))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("components");
         assertThatThrownBy(() -> mapper.toDto(parse(",\"valueBoolean\":false,\"dataAbsentReason\":{\"text\":\"Unknown\"}")))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("cannot both be present");
     }
+    @ParameterizedTest
+    @MethodSource("values")
+    void mapsComponentUsingAllExistingSupportedValueTypes(String fields, ObservationValue expected) {
+        ObservationDto dto = mapper.toDto(parse(",\"component\":[{\"code\":{\"text\":\"Synthetic component\"}," + fields + "}]"));
+        assertThat(dto.value()).isNull();
+        assertThat(dto.components()).hasSize(1);
+        assertThat(dto.components().getFirst().code().text()).isEqualTo("Synthetic component");
+        assertThat(dto.components().getFirst().value()).isEqualTo(expected);
+        assertThat(dto.components().getFirst().dataAbsentReason()).isNull();
+    }
+
+    @Test
+    void preservesComponentOrderMissingValuesAndAbsenceReason() {
+        Observation observation = parse("""
+                ,"valueString":"Top level",
+                "component":[
+                  {"code":{"text":"First"},"valueBoolean":false},
+                  {"code":{"text":"Second"},"dataAbsentReason":{"text":"Not measured"}},
+                  {"code":{"text":"Third"}}
+                ]
+                """);
+        ObservationDto dto = mapper.toDto(observation);
+        assertThat(dto.value()).isEqualTo(new ObservationValue(ValueType.STRING, new StringValue("Top level")));
+        assertThat(dto.components()).extracting(c -> c.code().text()).containsExactly("First", "Second", "Third");
+        assertThat(dto.components().get(1).value()).isNull();
+        assertThat(dto.components().get(1).dataAbsentReason().text()).isEqualTo("Not measured");
+        assertThat(dto.components().get(2).value()).isNull();
+        assertThat(dto.components().get(2).dataAbsentReason()).isNull();
+        observation.getComponentFirstRep().getCode().setText("Changed");
+        observation.getComponent().clear();
+        assertThat(dto.components().getFirst().code().text()).isEqualTo("First");
+        assertThatThrownBy(() -> dto.components().clear()).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void observationsWithoutComponentsHaveEmptyImmutableList() {
+        var components = mapper.toDto(parse("")).components();
+        assertThat(components).isEmpty();
+        assertThatThrownBy(() -> components.add(null)).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void rejectsMalformedComponentsAndConflictingValues() {
+        assertThatThrownBy(() -> mapper.toDto(parse(",\"component\":[{\"valueInteger\":1}]")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("Observation component code is required");
+        assertThatThrownBy(() -> mapper.toDto(parse("""
+                ,"component":[{"code":{"text":"Synthetic"},"valueBoolean":false,"dataAbsentReason":{"text":"Unknown"}}]
+                """)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("cannot both be present");
+    }
+
+    @Test
+    void rejectsUnsupportedComponentValuesWithoutDiscardingThem() {
+        assertThatThrownBy(() -> mapper.toDto(parse("""
+                ,"component":[{"code":{"text":"Synthetic"},
+                  "valueSampledData":{"origin":{"value":0},"period":1,"dimensions":1,"data":"1 2 3"}}]
+                """)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Observation value type is not supported by this projection");
+    }
+
 }
