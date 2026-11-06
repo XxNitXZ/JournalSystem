@@ -15,6 +15,7 @@ import ca.uhn.fhir.parser.DataFormatException;
 
 import com.medinexus.medicore.fhir.mapper.ConditionMapper;
 import com.medinexus.medicore.medicalrecord.dto.ConditionDto;
+import com.medinexus.medicore.medicalrecord.dto.CreateConditionRequest;
 
 @Component
 public class FhirConditionClient {
@@ -40,6 +41,21 @@ public class FhirConditionClient {
         }
         return requestExecutor.execute("condition-read", () -> fhirClient.read()
                 .resource(Condition.class).withId(id).execute());
+    }
+
+    /** Internal POST [base]/Condition. A failed response may follow a committed write; do not retry blindly. */
+    public String createCondition(CreateConditionRequest request) {
+        Condition resource = mapper.toResource(request);
+        return requestExecutor.execute("condition-create", () -> {
+            var outcome = fhirClient.create().resource(resource).execute();
+            var id = outcome == null ? null : outcome.getId();
+            if (outcome == null || !Boolean.TRUE.equals(outcome.getCreated()) || id == null
+                    || !"Condition".equals(id.getResourceType()) || id.getIdPart() == null
+                    || !id.getIdPart().matches("[A-Za-z0-9.-]{1,64}")) {
+                throw new DataFormatException("Condition creation response did not confirm a valid assigned ID");
+            }
+            return id.getIdPart();
+        });
     }
 
     /**
