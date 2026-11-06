@@ -30,6 +30,9 @@ public class User {
     @Column(name = "fhir_patient_id")
     private String fhirPatientId;
 
+    @Column(name = "fhir_practitioner_id")
+    private String fhirPractitionerId;
+
     public User() {
     }
 
@@ -67,5 +70,13 @@ public class User {
 
     public void setFhirPatientId(String fhirPatientId) {
         this.fhirPatientId = fhirPatientId;
+    }
+
+    public String getFhirPractitionerId() {
+        return fhirPractitionerId;
+    }
+
+    public void setFhirPractitionerId(String fhirPractitionerId) {
+        this.fhirPractitionerId = fhirPractitionerId;
     }
 }

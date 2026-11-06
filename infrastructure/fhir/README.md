@@ -29,6 +29,28 @@ later user stories.
 
 ## Configuration
 
+### Account identity references (single-server lab)
+
+Local accounts may remain unlinked. A PATIENT account may hold only a
+`fhir_patient_id`; DOCTOR and STAFF accounts may hold only a
+`fhir_practitioner_id`. PostgreSQL migration V3 enforces logical IDs of 1–64
+ASCII letters, digits, dots or hyphens, and unique ownership within each
+resource type (including across DOCTOR and STAFF). It does not validate remote
+resource existence or establish associations. Clinical records remain in FHIR.
+
+These references belong to the single fixed KTH server configured for this lab.
+**Do not change `FHIR_BASE_URL` and silently reinterpret existing references
+against another server.** A server change requires an explicit review and
+mapping strategy before linked accounts are used.
+
+V3 validates existing rows without clearing or repairing references. Before
+deployment, check Flyway history for version conflicts and audit existing
+non-null Patient IDs for duplicates, invalid format and incompatible roles.
+Resolve conflicts explicitly; do not edit applied migrations or silently
+rewrite records. Multiple accounts with null references remain valid.
+
+### Client settings
+
 All settings are in `src/main/resources/application.properties`:
 
 | Property | Default | Meaning |
