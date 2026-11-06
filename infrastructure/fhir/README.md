@@ -21,8 +21,9 @@ US-03.01 establishes the connection to the FHIR server:
 - timeouts, error categories and safe logging (see below),
 - an opt-in test against the real server.
 
-MediCore does **not** yet read, search, create, update or delete Patient,
-Practitioner, Observation, Condition or Encounter resources. The operations listed
+MediCore now supports read-by-logical-ID for Patient and Practitioner and their
+application DTO mapping. It does not yet search or create/update/delete these
+resources, or read Observation, Condition or Encounter. The operations listed
 under [Observed server capabilities](#observed-server-capabilities) are what the
 **server** declares, not features of MediCore. They are reference information for
 later user stories.
@@ -73,6 +74,97 @@ All settings are in `src/main/resources/application.properties`:
   server is only contacted when an operation is called.
 
 ## Checking connectivity
+
+### Trusted local account provisioning
+
+`com.medinexus.provisioning.FhirIdentityProvisioning` is a separate, one-shot
+operator command outside the normal application's component scan. It starts no
+web server and exposes no endpoint. Normal MediCore startup never provisions
+accounts, even if provisioning settings are present. There is no new admin role;
+DOCTOR/STAFF login does not grant provisioning permission. Only an operator with
+trusted local process/database access should run this command.
+
+The command delegates exactly once to `AccountFhirIdentityService.assign`.
+The account's persisted role selects Patient or Practitioner. Existing matching
+links are idempotent; different links, duplicate ownership, missing resources and
+identity mismatches are rejected by the existing service. Remote access is GET
+only; the sole intended write is the local account reference. No clinical data is
+copied into PostgreSQL.
+
+Prerequisites:
+
+1. Independently confirm the synthetic account and existing synthetic FHIR
+   resource belong together. Knowing an ID or finding a resource is not proof.
+2. Confirm the database and fixed KTH base URL; never reinterpret existing links
+   against another server. Review migrations before running: normal Flyway startup
+   applies any pending migrations, though provisioning adds no migrations.
+3. Configure `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` for the local database as
+   described in `infrastructure/database/README.md`. Spring does not read `.env`
+   automatically. Do not put credentials in command-line arguments.
+4. Build the executable JAR: `./mvnw -DskipTests package` (run tests separately).
+
+Example for macOS/Linux, from the repository root (Bash). The hidden prompts keep
+IDs out of terminal output and shell history. Do not enable shell tracing.
+
+```bash
+read -r -s -p 'Existing synthetic local account ID: ' MEDINEXUS_FHIR_PROVISIONING_ACCOUNT_ID
+printf '\n'
+read -r -s -p 'Confirmed synthetic logical FHIR ID: ' MEDINEXUS_FHIR_PROVISIONING_FHIR_ID
+printf '\n'
+export MEDINEXUS_FHIR_PROVISIONING_ACCOUNT_ID MEDINEXUS_FHIR_PROVISIONING_FHIR_ID
+export FHIR_BASE_URL=https://hapi-fhir.app.cloud.cbh.kth.se/fhir
+
+java -Dloader.main=com.medinexus.provisioning.FhirIdentityProvisioning \
+  -cp target/MediCore-0.0.1-SNAPSHOT.jar \
+  org.springframework.boot.loader.launch.PropertiesLauncher \
+  --medinexus.fhir.provisioning.enabled=true
+provision_status=$?
+printf 'Provisioning exit status: %s\n' "$provision_status"
+```
+
+The entry point accepts process environment/system properties or command-line
+properties named `medinexus.fhir.provisioning.enabled`, `.account-id`, and
+`.fhir-id`. The dotted prefix applies to all three names. The activation value
+must be exactly `true`. It is absent/disabled by default; input validation happens
+before starting Spring or connecting to either server. Supplying inputs in public
+HTTP requests has no effect.
+
+Process outcomes:
+
+| Exit | Output/meaning |
+|---|---|
+| 0 | `Provisioning completed successfully.` Context closed after one assignment attempt. |
+| 1 | Generic provisioning failure; no underlying messages or identifiers printed. |
+| 2 | Disabled or invalid configuration; no context or assignment started. |
+
+The command suppresses framework logs and failure reports so SQL/FHIR details
+are not printed. A failure during shutdown could occur after an assignment has
+committed; verify state before retrying. Do not assume every nonzero exit means
+the database is unchanged.
+
+Safe read-only verification using local `psql` (adjust host/database if needed):
+
+```bash
+PGPASSWORD="$DB_PASSWORD" psql -X --host=127.0.0.1 \
+  --username="$DB_USERNAME" --dbname=medinexus_db <<'SQL'
+\getenv account_id MEDINEXUS_FHIR_PROVISIONING_ACCOUNT_ID
+\getenv fhir_id MEDINEXUS_FHIR_PROVISIONING_FHIR_ID
+BEGIN READ ONLY;
+SELECT role,
+       CASE WHEN role = 'PATIENT' THEN fhir_patient_id = :'fhir_id'
+            ELSE fhir_practitioner_id = :'fhir_id' END AS association_matches
+FROM users WHERE id = :'account_id'::bigint;
+COMMIT;
+SQL
+unset MEDINEXUS_FHIR_PROVISIONING_ACCOUNT_ID MEDINEXUS_FHIR_PROVISIONING_FHIR_ID
+```
+
+Expect one row with the intended role and `association_matches = t`; no row means
+the local account was not found, and null/false is not a confirmed match. This
+prints no account IDs, FHIR IDs, names or clinical data. Keep credentials private
+and clear them from the shell when finished. Do not use an UPDATE to bypass a
+failed association. The ordinary `java -jar ...` command still starts MediCore,
+not this provisioning entry point.
 
 ### Opt-in connectivity test
 
