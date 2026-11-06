@@ -49,7 +49,7 @@ class KthFhirServerConnectivityIT {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withInitializer(new ConfigDataApplicationContextInitializer())
-            .withUserConfiguration(FhirClientConfig.class, FhirServerClient.class);
+            .withUserConfiguration(FhirClientConfig.class, FhirServerClient.class, FhirRequestExecutor.class);
 
     @Test
     void capabilityStatementDeclaresR4AndReadAndSearchForCoreResources() {

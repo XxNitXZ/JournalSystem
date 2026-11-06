@@ -140,7 +140,7 @@ class FhirServerClientTest {
 
     private ApplicationContextRunner contextRunner(String baseUrl, String socketTimeout) {
         return new ApplicationContextRunner()
-                .withUserConfiguration(FhirClientConfig.class, FhirServerClient.class)
+                .withUserConfiguration(FhirClientConfig.class, FhirServerClient.class, FhirRequestExecutor.class)
                 .withPropertyValues(
                         "medinexus.fhir.base-url=" + baseUrl,
                         "medinexus.fhir.connect-timeout=2s",
