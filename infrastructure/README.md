@@ -11,7 +11,9 @@ for Windows (PowerShell) and macOS (bash).
 | Frontend  | `medinexus-mediportal` | `medinexus-mediportal:local` | `mediportal/start-mediportal.ps1` / `.sh` |
 
 PostgreSQL details (password, volume, Flyway baseline, troubleshooting) are in
-[database/README.md](database/README.md).
+[database/README.md](database/README.md). Which data PostgreSQL owns and which
+the external FHIR server owns is described in
+[DATA_OWNERSHIP.md](DATA_OWNERSHIP.md).
 
 ## Architecture
 
