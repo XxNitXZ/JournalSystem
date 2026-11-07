@@ -10,10 +10,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
+import java.util.Arrays;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -89,16 +92,24 @@ class SecurityRouteAccessTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"GET, /api/auth/login", "GET, /api/auth/register", "POST, /api/auth/me",
-            "POST, /api/auth/csrf", "POST, /api/health", "POST, /v3/api-docs",
-            "POST, /swagger-ui/index.html", "GET, /api/auth/logout",
-            "GET, /api/unmatched", "POST, /api/unmatched", "GET, /error"})
-    void unmatchedMethodsAndPathsAreDeniedEvenWhenAuthenticated(String method, String path) throws Exception {
+    @MethodSource("deniedRequestsForEveryRole")
+    void unmatchedMethodsAndPathsAreDeniedEvenWhenAuthenticated(Role role, String method, String path) throws Exception {
         mvc.perform(request(HttpMethod.valueOf(method), path).with(csrf())
                         .with(authentication(UsernamePasswordAuthenticationToken.authenticated(
-                                new UserDto(42L, "user@example.com", Role.STAFF), null,
-                                List.of(new SimpleGrantedAuthority("ROLE_STAFF"))))))
+                                new UserDto(42L, "user@example.com", role), null,
+                                List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))))))
                 .andExpect(status().isForbidden());
+    }
+
+    private static Stream<Arguments> deniedRequestsForEveryRole() {
+        return Arrays.stream(Role.values()).flatMap(role -> Stream.of(
+                new String[] {"GET", "/api/auth/login"}, new String[] {"GET", "/api/auth/register"},
+                new String[] {"POST", "/api/auth/me"}, new String[] {"POST", "/api/auth/csrf"},
+                new String[] {"POST", "/api/health"}, new String[] {"POST", "/v3/api-docs"},
+                new String[] {"POST", "/swagger-ui/index.html"}, new String[] {"GET", "/api/auth/logout"},
+                new String[] {"GET", "/api/unmatched"}, new String[] {"POST", "/api/unmatched"},
+                new String[] {"GET", "/error"})
+                .map(request -> Arguments.of(role, request[0], request[1])));
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.medinexus.medicore.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -49,6 +50,18 @@ class PatientAccessServiceTest {
     void deniesMissingOrDeletedAccount() {
         when(repository.findById(principal.id())).thenReturn(Optional.empty());
         denied(principal, "synthetic-patient");
+    }
+
+    @Test
+    void rechecksCurrentAccountAfterPreviouslyPermittedAccess() {
+        account(Role.PATIENT, "synthetic-patient");
+        service.checkPatientAccess(principal, "synthetic-patient");
+
+        when(repository.findById(principal.id())).thenReturn(Optional.empty());
+        denied(principal, "synthetic-patient");
+
+        verify(repository, times(2)).findById(principal.id());
+        verifyNoMoreInteractions(repository);
     }
 
     @Test
