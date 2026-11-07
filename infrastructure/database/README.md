@@ -14,6 +14,9 @@ Both scripts are safe to run repeatedly. They create what is missing, start what
 is stopped and reuse what is already running. They **never delete or recreate**
 containers or volumes.
 
+The database holds local accounts and their FHIR ID references only; clinical
+data stays in FHIR. See [../DATA_OWNERSHIP.md](../DATA_OWNERSHIP.md).
+
 ## Configuration
 
 | Setting          | Value                         |
