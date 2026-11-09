@@ -20,6 +20,10 @@ test('shared authentication drives patient navigation and routes', async (contex
       assert.match(html, /href="\/register"/)
       assert.match(html, /Registration details/)
       assert.match(html, /Create an account/)
+      // Every new account needs a personnummer.
+      assert.match(html, /<label[^>]*for="register-personnummer"[^>]*>Personnummer<\/label>/)
+      assert.ok(html.includes('name="personnummer"'))
+      assert.match(html, /Used to find your medical record/)
     })
 
     await context.test('authenticated users cannot see Register or render its form', () => {
@@ -45,18 +49,18 @@ test('shared authentication drives patient navigation and routes', async (contex
 
     for (const role of ['PATIENT', 'DOCTOR', 'STAFF']) {
       const page = role.toLowerCase()
-      const title = page[0].toUpperCase() + page.slice(1) + ' home'
+      const title = page[0].toUpperCase() + page.slice(1) + ' dashboard'
       await context.test(`${role} sees only its own navigation and landing content`, () => {
         const html = renderRoute({ ...state, user: { ...patient, role } }, `/${page}`)
         assert.ok(html.includes(`href="/${page}"`))
         assert.ok(html.includes(`>${title}</h1>`))
         assert.match(html, /patient@example.com/)
-        assert.match(html, /will be implemented later/)
+        assert.match(html, /future release/)
         for (const other of ['patient', 'doctor', 'staff'].filter((value) => value !== page)) {
           assert.ok(!html.includes(`href="/${other}"`))
           const denied = renderRoute({ ...state, user: { ...patient, role } }, `/${other}`)
           assert.ok(denied.includes(`available to ${other} accounts only`))
-          assert.doesNotMatch(denied, /will be implemented later/)
+          assert.doesNotMatch(denied, /future release/)
           assert.doesNotMatch(denied, /Welcome,/)
         }
       })
@@ -68,17 +72,17 @@ test('shared authentication drives patient navigation and routes', async (contex
         const loading = renderRoute({ ...state, user, loading: true }, `/${page}`)
         assert.match(loading, /Checking your session/)
         assert.ok(!loading.includes(`href="/${page}"`))
-        assert.doesNotMatch(loading, /will be implemented later/)
+        assert.doesNotMatch(loading, /future release/)
         const anonymous = renderRoute(state, `/${page}`)
         // Navigate redirects after mounting; server rendering must already hide the child.
         assert.doesNotMatch(anonymous, /Welcome,|accounts only|Checking your session/)
         assert.ok(!anonymous.includes(`href="/${page}"`))
-        assert.doesNotMatch(anonymous, /will be implemented later/)
+        assert.doesNotMatch(anonymous, /future release/)
         const failed = renderRoute({ ...state, user, error: 'Session unavailable.' }, `/${page}`)
         assert.match(failed, /role="alert"/)
         assert.match(failed, /Session unavailable/)
         assert.ok(!failed.includes(`href="/${page}"`))
-        assert.doesNotMatch(failed, /will be implemented later/)
+        assert.doesNotMatch(failed, /future release/)
       })
     }
 
@@ -86,21 +90,24 @@ test('shared authentication drives patient navigation and routes', async (contex
       const html = renderInitialSession()
       assert.match(html, /Checking your session/)
       assert.doesNotMatch(html, /href="\/patient"/)
-      assert.doesNotMatch(html, /Patient information and messaging/)
+      assert.doesNotMatch(html, /patient-journal-access|Secure messaging/)
     })
 
     await context.test('patients see the navigation link and placeholder', () => {
       const html = renderRoute({ ...state, user: patient })
       assert.match(html, /href="\/patient"/)
       assert.match(html, /patient@example.com/)
-      assert.match(html, /Patient information and messaging will be implemented later/)
+      assert.match(html, /Secure messaging will be available in a future release/)
+      // The journal access card is shown and loads the status after mounting.
+      assert.match(html, /<h2 id="patient-journal-access">Medical record<\/h2>/)
+      assert.match(html, /Checking your medical record access/)
     })
 
     await context.test('anonymous users cannot render patient content before redirecting', () => {
       const html = renderRoute(state)
       assert.doesNotMatch(html, /Welcome,|accounts only/)
       assert.doesNotMatch(html, /href="\/patient"/)
-      assert.doesNotMatch(html, /Patient information and messaging/)
+      assert.doesNotMatch(html, /patient-journal-access|Secure messaging/)
     })
 
     await context.test('doctors and staff cannot display the patient landing page', () => {
@@ -108,7 +115,7 @@ test('shared authentication drives patient navigation and routes', async (contex
         const html = renderRoute({ ...state, user: { ...patient, role } })
         assert.match(html, /available to patient accounts only/)
         assert.doesNotMatch(html, /href="\/patient"/)
-        assert.doesNotMatch(html, /Patient information and messaging/)
+        assert.doesNotMatch(html, /patient-journal-access|Secure messaging/)
       }
     })
 
@@ -116,14 +123,14 @@ test('shared authentication drives patient navigation and routes', async (contex
       const html = renderRoute({ ...state, error: 'Unable to check your session.' })
       assert.match(html, /role="alert"/)
       assert.match(html, /Unable to check your session/)
-      assert.doesNotMatch(html, /Patient information and messaging/)
+      assert.doesNotMatch(html, /patient-journal-access|Secure messaging/)
     })
 
     await context.test('login and logout state is shared by account view and navigation', () => {
       const signedIn = renderRoute({ ...state, user: patient }, '/login')
       assert.match(signedIn, /href="\/patient"/)
       assert.match(signedIn, /patient@example.com/)
-      assert.match(signedIn, /Role: PATIENT/)
+      assert.match(signedIn, /<dd>Patient<\/dd>/)
       assert.match(signedIn, /Sign out/)
       const signedOut = renderRoute(state, '/login')
       assert.doesNotMatch(signedOut, /href="\/patient"/)

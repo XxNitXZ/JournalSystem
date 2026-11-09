@@ -16,8 +16,11 @@ host its own FHIR server and no FHIR container runs in Docker.
 MediCore talks to the FHIR server through one shared, configured HAPI FHIR R4
 client (`fhir/config/FhirClientConfig`). Every request runs through
 `FhirRequestExecutor`, which applies the timeouts, error categories and safe
-logging described below. There are **no REST endpoints or UI for FHIR data
-yet**; these belong to later epics. FHIR owns all clinical data; PostgreSQL
+logging described below. The only REST endpoints and UI for FHIR data are
+**patient registration** ([US-04.01](#patient-registration-us-0401)), the
+**patient profile** ([US-04.02](#patient-profile-us-0402)) and **patient
+search** ([search](#patient-search-and-the-patient-registry)); all others
+belong to later stories. FHIR owns all clinical data; PostgreSQL
 holds only accounts and FHIR ID references (see
 [../DATA_OWNERSHIP.md](../DATA_OWNERSHIP.md)).
 
@@ -26,7 +29,7 @@ holds only accounts and FHIR ID references (see
 | Resource | Client (`fhir/client`) | Operations | Mapper (`fhir/mapper`) / DTOs |
 |---|---|---|---|
 | Server | `FhirServerClient` | `fetchCapabilityStatement()`: `GET [base]/metadata` | HAPI `CapabilityStatement` |
-| Patient | `FhirPatientClient` | `readPatient(id)`: `GET [base]/Patient/{id}` | `PatientMapper` → `patient/dto/PatientDto` |
+| Patient | `FhirPatientClient` | `readPatient(id)`: `GET [base]/Patient/{id}`; `createPatient(CreatePatientRequest)`: conditional `POST [base]/Patient` (see [Patient registration](#patient-registration-us-0401)); `searchPatients(PatientSearchCriteria, knownIds)`: `POST [base]/Patient/_search` restricted by `_id` (see [Patient search](#patient-search-and-the-patient-registry)) | `PatientMapper` ↔ `patient/dto/PatientDto`, `CreatePatientRequest` |
 | Practitioner | `FhirPractitionerClient` | `readPractitioner(id)`: `GET [base]/Practitioner/{id}` | `PractitionerMapper` → `practitioner/dto/PractitionerDto` |
 | Observation | `FhirObservationClient` | `readObservation(id)`, `createObservation(CreateObservationRequest)`, `findByPatientId(patientId)` | `ObservationMapper` ↔ `medicalrecord/dto/ObservationDto`, `CreateObservationRequest` |
 | Condition | `FhirConditionClient` | `readCondition(id)`, `createCondition(CreateConditionRequest)`, `findByPatientId(patientId)` | `ConditionMapper` ↔ `medicalrecord/dto/ConditionDto`, `CreateConditionRequest` |
@@ -35,7 +38,8 @@ holds only accounts and FHIR ID references (see
 | Location | `FhirLocationClient` | `readLocation(id)`, `createLocation(LocationWriteRequest)`, `updateLocation(id, expectedVersionId, LocationWriteRequest)` | `LocationMapper` ↔ `location/dto/LocationDto`, `LocationWriteRequest` (see [Location](#location)) |
 
 Current callers: `FhirPatientClient` and `FhirPractitionerClient` are used by
-`AccountFhirIdentityService` (account linking, see below). The Server,
+`AccountFhirIdentityService` (account linking, see below), and
+`FhirPatientClient` by `PatientService` (patient registration and profile). The Server,
 Observation, Condition, Encounter, Organization and Location clients have no
 production callers yet; they are complete, tested building blocks for later
 epics.
@@ -43,7 +47,8 @@ epics.
 **Not implemented:** update of any resource other than Organization and
 Location; patch or delete of any resource; search for Patient, Practitioner,
 Organization or Location; resolving or checking the existence of referenced
-resources; REST controllers and UI.
+resources; REST controllers and UI other than patient registration and the
+patient profile.
 
 ### Conventions shared by all clients
 
@@ -283,6 +288,412 @@ target is unchanged keeps its `display`. A Location with resource-level
 `implicitRules` or `modifierExtension`, or a `modifierExtension` on `position`,
 is never rewritten (`INVALID_RESPONSE`, no `PUT`). Cycles in `partOf` longer
 than a self-reference are not detected.
+
+### Patient registration (US-04.01)
+
+`POST /api/patients` (`PatientController` → `PatientService` →
+`FhirPatientClient.createPatient`) registers a new Patient in HAPI FHIR. It is
+allowed only for **DOCTOR** and **STAFF** accounts: a URL rule in
+`SecurityConfig` checks the session role, and `PatientService` checks the
+account's current role in PostgreSQL again. CSRF protection applies.
+MediPortal offers the form at `/patients/new`.
+
+| Request field (`CreatePatientRequest`) | FHIR element | Rule |
+|---|---|---|
+| `personnummer` (required) | `identifier` (`use=official`, `system=http://electronichealth.se/identifier/personnummer`) | exactly 12 digits `YYYYMMDDXXXX` whose first eight are a real date (coordination numbers are rejected); the Luhn check digit is **not** validated; MediPortal also accepts `YYYYMMDD-XXXX` and sends 12 digits |
+| `birthDate` (optional since US-04.03) | `birthDate` (day precision) | derived from the personnummer when omitted (MediPortal no longer asks for it); if given, it must equal the date in the personnummer; never in the future (Europe/Stockholm) |
+| `family` (required) | `name[0].family` (`use=official`) | nonblank after stripping, at most 100 characters, no control characters |
+| `given` (1–10, required) | `name[0].given` | each as `family` |
+| `gender` (required) | `gender` | `MALE`, `FEMALE`, `OTHER` or `UNKNOWN` |
+| (fixed) | `active` | `true` |
+
+No ID, meta or narrative is sent. Validation happens before any request;
+error messages never contain the submitted values.
+
+**Duplicates** are prevented by a FHIR conditional create:
+`If-None-Exist: identifier=http://electronichealth.se/identifier/personnummer|{personnummer}`.
+If the server finds one matching Patient it creates nothing and answers 200;
+several matches give 412. Both are reported as `DuplicatePatientException` →
+HTTP 409, without the existing Patient's ID. Because the KTH server is shared,
+a synthetic personnummer that another group already used is also a duplicate.
+
+| Outcome | HTTP |
+|---|---|
+| Created | 201, `Location: /api/patients/{id}`, body `PatientDto` |
+| Invalid data or unreadable JSON | 400 |
+| Not signed in / wrong role / missing CSRF token | 401 / 403 / 403 |
+| Personnummer already registered | 409 |
+| Rejected by the FHIR server (4xx) | 422 |
+| Invalid FHIR response or FHIR 5xx | 502 |
+| FHIR timeout or unavailable | 503 |
+
+Error responses have no body. After 502 or 503 the registration may have been
+completed; there are no automatic retries, and repeating the registration is
+safe because a completed one is then reported as 409.
+
+**Logging:** `FhirRequestExecutor` logs failures with the operation name
+`patient-create` only; `PatientService` logs the outcome with the account ID.
+The personnummer, names, birth date and the FHIR Patient ID are never logged
+(verified by `FhirPatientCreateTest`, `FhirUnavailableServerTest`,
+`PatientServiceTest`, `PatientControllerTest` and
+`PatientRegistrationIntegrationTest`). The personnummer is stored only in
+`Patient.identifier` in HAPI FHIR, never in PostgreSQL.
+
+Tests use fictional personnummer only (see
+[Fictional patient identities](#fictional-patient-identities)) or
+deliberately invalid numbers, against local servers. (An earlier version of
+this document said that birth numbers 980–999 are reserved for test
+personnummer; that was not verified and is wrong: most official test numbers
+use other birth numbers.)
+`LocalFhirServer` supports `If-None-Exist` with an `identifier=system|value`
+condition. Whether the KTH server enforces `If-None-Exist` has **not** been
+verified, because that would require a write request.
+
+Registration never links the Patient to a PATIENT account and never creates a
+journal access request. If the PATIENT account with the same personnummer has
+already asked for access and is waiting for its record, that request is
+attached to the new Patient and becomes `PENDING` for a doctor to review (see
+[Journal access requests](#journal-access-requests-us-0403)); the operator
+command (see [Trusted local account provisioning](#trusted-local-account-provisioning))
+still works as before.
+
+**Known limitation (account registration, Epic 2):** `POST /api/auth/register`
+is public and lets the caller choose the role, including DOCTOR and STAFF. The
+role check above is therefore only as strong as account registration. Changing
+account registration is outside US-04.01.
+
+### Patient profile (US-04.02)
+
+`GET /api/patients/{id}` (`PatientController` → `PatientService.getPatient` →
+`FhirPatientClient.readPatient` → `PatientMapper.toDto`) returns one Patient's
+`PatientDto`, read **directly from HAPI FHIR** on every request. Nothing is
+stored or cached in PostgreSQL or MediCore, and responses carry
+`Cache-Control: no-store`. MediPortal shows it at `/patients/{id}`
+(`PatientProfilePage`) for DOCTOR and STAFF; profiles are opened from the
+[patient search](#patient-search-and-the-patient-registry) or from the link
+after a registration. The FHIR ID is used only in the route and is not shown.
+
+Access, in this order:
+
+1. URL rule in `SecurityConfig`: `GET /api/patients/*` for DOCTOR and STAFF
+   only (one path segment; `GET /api/patients` and any list or search stay
+   denied);
+2. the account's **current** role in PostgreSQL must be DOCTOR or STAFF
+   (`PatientService`); a stale session role is not enough;
+3. the ID must be a logical FHIR ID (`[A-Za-z0-9.-]{1,64}`), otherwise 400;
+4. `PatientAccessService.checkPatientAccess` (reused ownership check);
+5. the Patient must be **known to MediCore** (`PatientRegistry`: registered by
+   MediCore or linked to an account), otherwise 404 without any FHIR request;
+6. exactly one `GET [base]/Patient/{id}`; the returned resource must have the
+   requested ID, otherwise 502.
+
+PATIENT accounts get 403 here, even for their own linked Patient; they read
+their own record through `GET /api/patients/me` (US-04.03, see
+[Journal access requests](#journal-access-requests-us-0403)).
+
+Since US-04.03 the response is a `PatientProfileDto`: the `PatientDto` fields
+plus `email`, the e-mail of the PATIENT account linked to this Patient
+(`users.fhir_patient_id`), read from PostgreSQL on each request, or `null`
+without a linked account. MediPortal shows "Not available" for `null`.
+
+| Outcome | HTTP |
+|---|---|
+| Found | 200, `PatientProfileDto` |
+| Invalid ID | 400 |
+| Not signed in / not DOCTOR or STAFF | 401 / 403 |
+| FHIR answers 404 or 410 | 404 |
+| Other FHIR 4xx | 422 |
+| Invalid FHIR response (including a different Patient), FHIR 5xx | 502 |
+| FHIR timeout or unavailable | 503 |
+
+Error responses have no body. Logs contain the account ID and the outcome
+(`Patient profile viewed` / `Patient profile not found`), never the Patient ID
+or patient data; `FhirRequestExecutor` logs FHIR failures as `patient-read`.
+Tests: `PatientServiceTest`, `PatientControllerTest`,
+`PatientProfileIntegrationTest` (PostgreSQL `medinexus_test`, local FHIR
+server, synthetic Patients only); `patient-read` is part of
+`FhirUnavailableServerTest`.
+
+**Limitations: this is not production-grade patient access control.**
+
+- **Self-registration:** anyone can register a DOCTOR or STAFF account (see the
+  known limitation above) and then read any Patient's profile, including the
+  personnummer.
+- **Shared server:** the KTH server is shared and unauthenticated. Profiles and
+  searches are limited to Patients known to MediCore, so other users' Patients
+  are not shown. Anyone can still change or delete MediCore's Patients on the
+  server itself; MediCore cannot prevent that. Use synthetic data only.
+- **No access log:** there is no audit log of which Patient was viewed by whom,
+  as Swedish patient data legislation (patientdatalagen) would require in
+  production.
+
+### Patient updates (US-04.04)
+
+`PATCH /api/patients/{id}` (`PatientController` → `PatientService.updatePatient`
+→ `FhirPatientClient.updatePatient`) lets **DOCTOR** and **STAFF** change a
+registered Patient's **gender** in HAPI FHIR, nothing else. MediPortal offers
+it as "Edit Patient" on the profile (`/patients/{id}`), where name,
+personnummer and birth date are shown read-only. PATIENT accounts cannot edit
+(403), not even their own record.
+
+**Immutable:** first and last name (`Patient.name`), personnummer
+(`Patient.identifier`), birth date and the FHIR ID. The body may contain only
+`gender` (`FEMALE`, `MALE`, `OTHER`, `UNKNOWN`); any other property, such as
+`givenName`, `familyName`, `personnummer`, `birthDate`, `id`, `email` or
+`phoneNumber`, is rejected with 400 before anything is read. The service
+compares the names, identifiers and birth date before writing and with the
+server's answer; a difference is never reported as a success. There is no
+identity-correction workflow.
+
+Order: URL rule (`PATCH /api/patients/*` for DOCTOR/STAFF) and CSRF; the
+account's current role in PostgreSQL; the ID format (400); the values (400,
+same rules as registration, before any FHIR request); the version (`If-Match`,
+428 `VERSION_REQUIRED` without it); MediCore's registry (404 without any FHIR
+request for Patients MediCore does not know); one read (404/410 → 404); then
+one update.
+
+**Only the gender changes.** The Patient is read from FHIR, changed in place
+and written back whole (`PUT [base]/Patient/{id}`), so its meta, names,
+identifiers, birth date, telecom, addresses, extensions and all other elements
+stay as they were; no new Patient is created.
+
+**Contact details are not FHIR data in MediCore.** Patient profiles
+(`GET /api/patients/{id}`) and My Medical Record (`GET /api/patients/me`)
+return `email` and `phoneNumber` of the PATIENT account linked through
+`users.fhir_patient_id`, read from PostgreSQL on each request, or `null`
+("Not available") without a linked account. `Patient.telecom` is never read
+for them and never written; existing telecom values are preserved by updates.
+Patient registration asks for no contact details and needs no account.
+
+**Concurrency:** the profile returns the Patient's FHIR `version` (not shown in
+the UI). MediPortal sends it back as `If-Match`; MediCore refuses the update
+with 409 `VERSION_CONFLICT` if the Patient has a newer version, and sends the
+update to FHIR with `If-Match: W/"version"`, so a change between MediCore's
+read and write is rejected by the server (409/412 → 409 `VERSION_CONFLICT`).
+Nothing is overwritten silently. FHIR timeouts and outages are 503, invalid
+responses 502, other rejections by the FHIR server 422; after a 503 the
+outcome is unknown and MediPortal says so.
+
+Nothing is stored in PostgreSQL: the account of a linked PATIENT is not
+changed, the account link
+(`users.fhir_patient_id`) and journal access requests are unaffected, and no
+request is created. Logs contain the account ID only (`Patient updated`,
+`patient-update` for FHIR failures). Whether the KTH server honours
+`If-Match` has not been verified, because that would require a write
+request; the local test server does, like HAPI.
+
+Tests: `FhirPatientUpdateTest`, `PatientDemographicsUpdateTest`,
+`UpdatePatientRequestTest`, `PatientServiceTest`, `PatientControllerTest` and
+`PatientUpdateIntegrationTest` (PostgreSQL `medinexus_test`, local FHIR
+server, fictional data).
+
+### Patient search and the patient registry
+
+MediCore cannot tell its own Patients apart from other Patients on the shared,
+unauthenticated KTH server by looking at them: nothing in a Patient marks who
+created it, the personnummer system is shared by everyone, and any tag could be
+added or removed by anyone. MediCore therefore keeps a local **registry**:
+
+- `registered_patients` (Flyway V5) stores the logical FHIR ID, the registering
+  account (`ON DELETE SET NULL`) and the time, written by `PatientRegistry`
+  right after a successful registration. No names, personnummer or other
+  patient data;
+- Patients linked to an account by the operator command
+  (`users.fhir_patient_id`) also count as known, so existing identity links
+  keep working without a registry entry.
+
+`POST /api/patients/search` (`{"query": "..."}`, DOCTOR and STAFF, CSRF; URL
+rule plus the current database role) searches **only** these Patients:
+
+| Query | FHIR search |
+|---|---|
+| 12 digits, optionally `YYYYMMDD-NNNN`, valid personnummer | `identifier=http://electronichealth.se/identifier/personnummer|{number}`; only exact matches are returned |
+| 1–5 name parts (letters, hyphens, apostrophes; at least 2 letters) | one `name` parameter per part; all must match (HAPI: start of a family name, given name or text, ignoring case and accents) |
+
+- Every request is `POST [base]/Patient/_search` with a form body, so neither
+  names nor personnummer appear in any URL (MediPortal → MediCore → FHIR). The
+  KTH server was verified (read-only, with a nonexistent `_id`) to answer such
+  a request with a `searchset` and a self link without parameters.
+- The known IDs are sent as `_id=a,b,c` in batches of 50, so other Patients are
+  never requested. Every returned Patient must be one of the requested IDs and
+  appear once, otherwise the whole search fails (`INVALID_RESPONSE`, 502).
+- Up to 10 pages of 100 per batch are followed (next links must stay within
+  the FHIR base); more than 1,000 matches give 422 `{"code":"TOO_MANY_RESULTS"}`.
+- All matches are returned, sorted by family name, given names and birth date;
+  Patients with identical names are separate results. MediPortal shows name,
+  personnummer and birth date with an "Open profile" action per result and
+  never opens a profile automatically. FHIR IDs are not displayed.
+- Errors: 400 invalid query, 401/403, 422 too many results, 502/503 FHIR
+  failures; logs contain the account ID and the number of results only.
+
+**Registration and the registry.** If the FHIR create succeeds but the registry
+entry cannot be written, MediCore answers 500 `{"code":"REGISTRY_FAILED"}` and
+logs the FHIR ID once at ERROR level so that an operator can add it; the
+Patient exists in FHIR but is not searchable, and registering it again would be
+a duplicate (409). MediPortal tells the user not to register again.
+
+**Patients registered before V5** have no registry entry and are no longer
+found or shown unless they are linked to an account. MediCore cannot identify
+them on the shared server. An operator can add a known ID with
+`INSERT INTO registered_patients (fhir_patient_id) VALUES ('...')`; a dedicated
+operator command does not exist yet.
+
+### Fictional patient identities
+
+Any personnummer with a **real date of birth** can be registered, with any
+nonblank first and last names; there is no allowlist and **no Luhn check-digit
+validation** (the last four digits are not checked, so freely chosen fictional
+numbers work). The rules are (`Personnummer`, mirrored in MediPortal):
+
+- exactly 12 digits `YYYYMMDDXXXX` (`YYYYMMDD-XXXX` is accepted and
+  normalized to 12 digits; nothing else is changed or truncated), and the first
+  eight digits are a real calendar date; coordination numbers (day + 60) are
+  therefore rejected;
+- the birth date is derived from the personnummer (or, if sent, must equal
+  it) and must not be in the future (Europe/Stockholm);
+- the same rules apply to the personnummer of every new account
+  (`POST /api/auth/register`), which must also be unique among accounts;
+- names are nonblank after trimming, at most 100 characters each, without
+  control characters;
+- duplicate detection (`If-None-Exist`), the patient registry, search and
+  profiles work as described above; personnummer and names are never logged.
+
+Matching between accounts and Patients (journal access requests) compares the
+normalized 12 digits exactly; the check digit plays no part. The database only
+requires 12 digits (`ck_users_personnummer_format`, V6) and uniqueness.
+
+**Use fictional identities only.** A number with a real date may belong to
+a real person, and MediCore cannot check that (it has no access to the
+population register). This matters especially on the shared, unauthenticated
+KTH server, where everything stored is visible to and changeable by anyone.
+Skatteverket publishes test personnummer that will never be assigned to real
+people (open data "Testpersonnummer",
+<https://www.skatteverket.se/omoss/digitalasamarbeten/omvaraoppnadata/testpersonnummersomoppendata.4.5b35a6251761e6914202df9.html>);
+using them is recommended but no longer enforced. Automated tests use numbers
+from that list, numbers with birth years in the 19th century (which no living
+person can have, because personnummer were introduced in 1947; `TestPersonnummer`
+gives them a deliberately wrong check digit) or deliberately invalid numbers,
+and run only against local mock FHIR servers
+(`FictionalIdentityRegistrationIntegrationTest`, `PersonnummerTest`,
+`PatientServiceTest`).
+
+### Journal access requests (US-04.03)
+
+A PATIENT account gets access to its medical record only when the **patient
+asks for it** and a **doctor approves**. A request is created only by the
+patient's explicit action, `POST /api/journal-access/me/request` (the "Request
+Journal Access" button on the patient dashboard); account registration,
+Patient registration, loading the dashboard, matching and patient searches
+never create one. Matching uses the account's personnummer
+(`users.personnummer`, Flyway V6) and the personnummer of Patients registered
+through MediCore, **exact personnummer only**, never names, and never links an
+account by itself.
+
+**Asking for access** (PATIENT only, CSRF; no request body is read, so no user
+ID, personnummer or FHIR ID can be supplied by the client):
+
+| Situation | Result |
+|---|---|
+| Account already linked | `200 {"status":"APPROVED"}`, nothing created |
+| An open request exists (repeated or concurrent clicks) | `200` with its status, nothing created; a waiting request is matched again |
+| A registered Patient has the account's personnummer | new request `PENDING` (`200 {"status":"PENDING"}`) |
+| No such Patient yet, or the FHIR search failed | new request `AWAITING_RECORD` without a FHIR Patient; an outage is not treated as a non-match, the request is matched again later |
+| The latest request was rejected | `409 REQUEST_REJECTED`, nothing created (a doctor can reconsider) |
+| The matching Patient is linked to another account | `409 LINK_CONFLICT`, nothing created |
+| Account without personnummer (created before V6) | `409 PERSONNUMMER_MISSING` |
+
+The search (`JournalAccessMatcher.findRegisteredPatient`) is
+`POST Patient/_search` with `identifier=` and `_id=` restricted to
+`registered_patients`, as in the patient search; other Patients on the shared
+server are never requested. If several free registered Patients match, nothing
+is attached automatically.
+
+**Waiting requests are matched later, without another click**
+(`JournalAccessMatcher`, which never creates requests):
+
+- when a DOCTOR or STAFF registers a Patient (`POST /api/patients`), a request
+  `AWAITING_RECORD` of the PATIENT account with the same personnummer is
+  attached to it and becomes `PENDING` (PostgreSQL only, no extra FHIR
+  request; a failure is logged and does not fail the registration);
+- when the PATIENT's status is read (`GET /api/journal-access/me`), a waiting
+  request is searched again (this also recovers from a FHIR outage).
+
+Without a waiting request nothing happens in either case. Attaching is a
+conditional update (`AWAITING_RECORD` → `PENDING`), so retries are idempotent.
+
+Flyway V8 (after V7) allows `fhir_patient_id` to be `NULL` only for
+`AWAITING_RECORD`, requires it for `PENDING`, `APPROVED` and `REJECTED`, keeps
+the review rule (open requests unreviewed, decided ones with a review time),
+and replaces the V7 index with a partial unique index on `user_id` for open
+requests (`AWAITING_RECORD`, `PENDING`): at most one open request per account,
+also while it has no FHIR Patient (a unique index over a nullable column would
+not stop duplicates, because NULLs are distinct). Existing rows, including
+requests created automatically before V8, are kept unchanged; V8 stops with an
+error instead of changing history if an account had several `PENDING`
+requests. DOCTOR and STAFF accounts can never ask.
+
+**Review** (`JournalAccessService`, DOCTOR only: URL rules in `SecurityConfig`
+plus the current role in PostgreSQL; CSRF for every decision):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/journal-access-requests` | all requests, `PENDING` first, then `AWAITING_RECORD`, then decided: account name, personnummer, e-mail, status, times (no FHIR ID) |
+| `GET /api/journal-access-requests/pending/count` | `{"pending": n}`, only actionable `PENDING` requests, for the dashboard and navigation badge |
+| `GET /api/journal-access-requests/{id}` | the account next to the FHIR Patient (one `GET Patient/{id}`; none for `AWAITING_RECORD`): names, personnummer, gender, birth date, `recordStatus` (`AVAILABLE`, `NOT_FOUND`, `UNAVAILABLE`, `NOT_REGISTERED`) and `personnummerMatches` |
+| `POST /api/journal-access-requests/{id}/approve` | approve and link |
+| `POST /api/journal-access-requests/{id}/reject` | reject; the account is not linked |
+| `POST /api/journal-access-requests/{id}/reopen` | reconsider a rejected request: a new `PENDING` request, the rejected one stays as history |
+
+**Approval** checks the request (`PENDING`), the account (PATIENT, not linked
+elsewhere, no Practitioner link), that no other account is linked to the
+Patient, reads the Patient **once** (outside any database transaction) and
+requires its personnummer to equal the account's. Then, in **one database
+transaction**, the request is set to `APPROVED` with the reviewer and time
+(only while still `PENDING`) and `users.fhir_patient_id` is set (only while
+still `NULL`); the unique constraint on `fhir_patient_id` stops a second
+account. If any step fails, nothing changes. A request `AWAITING_RECORD` can be
+neither approved nor rejected (`409 AWAITING_RECORD`). Conflicts are 409 with a code:
+`AWAITING_RECORD`, `REQUEST_NOT_PENDING`, `REQUEST_NOT_REJECTED`, `ALREADY_PENDING`,
+`ACCOUNT_NOT_ELIGIBLE`, `LINK_CONFLICT`, `FHIR_PATIENT_MISSING`,
+`PERSONNUMMER_MISMATCH`. FHIR failures are 503/502; an unknown request is 404,
+a malformed ID 400.
+
+**PATIENT side:** `GET /api/journal-access/me` returns `NONE` (not asked yet),
+`AWAITING_RECORD`, `PENDING`, `APPROVED` (linked) or `REJECTED` (latest request
+rejected); it never creates a request.
+`GET /api/patients/me` returns the linked Patient as a `PatientProfileDto`
+with the account's own e-mail, read directly from FHIR; the record is always
+taken from `users.fhir_patient_id`, never from the request. Without a link it
+is 404 `{"code":"RECORD_NOT_LINKED"}`; a Patient that no longer exists in FHIR
+gives 404 `{"code":"RECORD_NOT_FOUND"}`. DOCTOR and STAFF get 403 on both
+endpoints; PATIENT accounts still get 403 on `GET /api/patients/{id}`.
+MediPortal shows the status on the patient dashboard and the record at
+`/patient/record`; doctors review at `/doctor/journal-requests`.
+
+**Logging:** request IDs, account IDs and reviewer IDs only; never
+personnummer, names or FHIR Patient IDs.
+
+**Tests:** `JournalAccessMatcherTest`, `JournalAccessServiceTest`,
+`JournalAccessControllerTest`, `PatientServiceTest`, `PatientControllerTest`
+and `JournalAccessIntegrationTest` (PostgreSQL `medinexus_test`, local FHIR
+server, fictional 19th-century personnummer only: nothing created by
+registrations, dashboards or searches; explicit requests with and without a
+registered record; later matching; FHIR outage; double and concurrent clicks;
+rejection and reconsideration; foreign and name-only matches; personnummer
+mismatch, deleted Patient, link conflicts, concurrent approvals; V8
+constraints; roles and CSRF).
+
+**Limitations.** The account's personnummer is self-declared at registration;
+there is no identity verification (BankID or similar), so a person who knows
+someone else's personnummer could register with it before that person does.
+The doctor's review is the safeguard, and the review page shows both sides for
+that purpose. Account registration also still lets anyone create a DOCTOR
+account (see the known limitation under
+[Patient registration](#patient-registration-us-0401)). Accounts created before
+V6 have no personnummer and are never matched; they can still be linked by the
+operator command. The shared KTH server can change a Patient after approval;
+the link is not re-verified later.
+
 
 ### Verified FHIR patient journey (NIT-137)
 
@@ -727,9 +1138,10 @@ random `@example.test` e-mails and delete exactly those accounts afterwards.
 
 ## Why there are no write tests against KTH
 
-MediCore can create Observation, Condition, Encounter, Organization and Location
-resources and update Organization and Location resources, but every create and
-update test runs against a **local** HTTP server only. The round-trip tests
+MediCore can create Patient (conditional create), Observation, Condition,
+Encounter, Organization and Location resources and update Organization and
+Location resources, but every create and update test runs against a **local**
+HTTP server only. The round-trip tests
 (`FhirClinicalRoundTripTest`, `FhirEncounterRoundTripTest`) and
 `FhirOrganizationUpdateTest`/`FhirLocationUpdateTest` use a local stateful server
 that stores created resources and serves them to read and search requests; for

@@ -1,15 +1,7 @@
-import { useAuth } from '../auth/AuthContext.ts'
+import ClinicalDashboard from '../dashboard/ClinicalDashboard.tsx'
 
 function StaffPage() {
-  const { user } = useAuth()
-
-  return (
-    <section className="page" aria-labelledby="staff-title">
-      <h1 id="staff-title">Staff home</h1>
-      <p className="page__lead">Welcome, {user?.email}.</p>
-      <p>Clinical functionality will be implemented later.</p>
-    </section>
-  )
+  return <ClinicalDashboard role="staff" />
 }
 
 export default StaffPage

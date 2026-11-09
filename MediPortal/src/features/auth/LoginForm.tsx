@@ -1,12 +1,20 @@
 import { useRef, useState, type SubmitEvent } from 'react'
+import { LogIn } from 'lucide-react'
+import { Link, Navigate } from 'react-router'
+import AuthLayout from '../../components/layout/AuthLayout.tsx'
+import Alert from '../../components/ui/Alert.tsx'
+import FormField from '../../components/ui/FormField.tsx'
+import LoadingState from '../../components/ui/LoadingState.tsx'
+import AccountOverview from './AccountOverview.tsx'
 import { useAuth } from './AuthContext.ts'
 import { loginErrorMessage } from './loginErrorMessage.ts'
+import { dashboardPath } from './roleLabels.ts'
 
 function LoginForm() {
-  const { user, loading, error: sessionError, signIn, signOut: logout } = useAuth()
+  const { user, loading, error: sessionError, signIn } = useAuth()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  const [signedInHere, setSignedInHere] = useState(false)
   const submitting = useRef(false)
 
   async function submit(event: SubmitEvent<HTMLFormElement>) {
@@ -17,9 +25,8 @@ function LoginForm() {
     const email = String(fields.get('email') ?? '')
     const password = String(fields.get('password') ?? '')
     setError('')
-    setMessage('')
     if (!password.trim() || new TextEncoder().encode(password).length > 72) {
-      setError('Enter a nonblank password of at most 72 UTF-8 bytes.')
+      setError('Enter a password of up to 72 characters. Some special characters count as more than one.')
       return
     }
     submitting.current = true
@@ -27,7 +34,7 @@ function LoginForm() {
     try {
       await signIn({ email, password })
       form.reset()
-      setMessage('You are signed in.')
+      setSignedInHere(true)
     } catch (failure: unknown) {
       setError(loginErrorMessage(failure))
     } finally {
@@ -36,49 +43,37 @@ function LoginForm() {
     }
   }
 
-  async function signOut() {
-    if (submitting.current) return
-    submitting.current = true
-    setPending(true)
-    setError('')
-    setMessage('')
-    try {
-      await logout()
-      setMessage('You are signed out.')
-    } catch {
-      setError('Unable to confirm logout. Please try again.')
-    } finally {
-      submitting.current = false
-      setPending(false)
-    }
-  }
+  if (loading) return <LoadingState label="Checking your session…" />
+  // Right after signing in, continue to the dashboard; otherwise /login shows the account page.
+  if (user && signedInHere) return <Navigate to={dashboardPath(user.role)} replace />
+  if (user) return <AccountOverview user={user} />
 
   return (
-    <section className="page" aria-labelledby="login-title">
-      <h1 id="login-title">{user ? 'Your account' : 'Sign in'}</h1>
-      {loading ? <p role="status">Checking your session…</p> : user ? (
-        <div className="registration-form">
-          <p>Signed in as <strong>{user.email}</strong></p>
-          <p>Role: {user.role}</p>
-          <button className="button-link" type="button" disabled={pending} onClick={() => void signOut()}>
-            {pending ? 'Signing out…' : 'Sign out'}
-          </button>
-        </div>
-      ) : (
-        <form className="registration-form" onSubmit={submit} aria-busy={pending}>
-          <fieldset disabled={pending}>
-            <legend>Login details</legend>
-            <label htmlFor="login-email">Email</label>
+    <AuthLayout titleId="login-title">
+      <div>
+        <h1 id="login-title">Sign in</h1>
+        <p className="auth__lead">Welcome back. Sign in with your email address and password.</p>
+      </div>
+      <form className="form" onSubmit={submit} aria-busy={pending}>
+        <fieldset disabled={pending}>
+          <legend className="visually-hidden">Login details</legend>
+          <FormField htmlFor="login-email" label="Email">
             <input id="login-email" name="email" type="email" autoComplete="username" maxLength={255} required />
-            <label htmlFor="login-password">Password</label>
+          </FormField>
+          <FormField htmlFor="login-password" label="Password">
             <input id="login-password" name="password" type="password" autoComplete="current-password" required />
-            <button className="button-link" type="submit">{pending ? 'Signing in…' : 'Sign in'}</button>
-          </fieldset>
-        </form>
+          </FormField>
+          <button className="btn btn--primary btn--block" type="submit">
+            <LogIn size={18} aria-hidden="true" />
+            {pending ? 'Signing in…' : 'Sign in'}
+          </button>
+        </fieldset>
+      </form>
+      <Alert tone="error" role="alert">{error || sessionError}</Alert>
+      {!sessionError && (
+        <p className="form__footer">New to MediCore? <Link to="/register">Create an account</Link></p>
       )}
-      <p role="alert" className="registration-error">{error || sessionError}</p>
-      <p role="status">{message}</p>
-    </section>
+    </AuthLayout>
   )
 }
 

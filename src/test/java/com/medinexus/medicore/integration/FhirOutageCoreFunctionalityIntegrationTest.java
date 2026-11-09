@@ -33,6 +33,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import com.medinexus.medicore.support.TestPersonnummer;
 import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.entity.User;
 import com.medinexus.medicore.auth.repository.UserRepository;
@@ -144,7 +145,7 @@ class FhirOutageCoreFunctionalityIntegrationTest {
             assertThat(json.readTree(health.body()).get("status").asString()).isEqualTo("UP");
 
             HttpResponse<String> registered = post(client, "/api/auth/register",
-                    "{\"email\":\"" + email + "\",\"password\":\"" + password + "\",\"role\":\"PATIENT\"}");
+                    "{\"email\":\"" + email + "\",\"password\":\"" + password + "\",\"role\":\"PATIENT\",\"givenName\":\"Synthetic\",\"familyName\":\"Testperson\",\"personnummer\":\"" + TestPersonnummer.next() + "\"}");
             assertThat(registered.statusCode()).isEqualTo(201);
             createdAccounts.add(json.readTree(registered.body()).get("id").asLong());
 
@@ -175,7 +176,7 @@ class FhirOutageCoreFunctionalityIntegrationTest {
 
     @Test
     void identityAssignmentDuringTheOutageFailsOnceAndChangesNothing(CapturedOutput output) {
-        Long accountId = registration.register(email, password, Role.PATIENT).id();
+        Long accountId = registration.register(email, password, Role.PATIENT, "Synthetic", "Testperson", TestPersonnummer.next()).id();
         createdAccounts.add(accountId);
         User before = users.findById(accountId).orElseThrow();
         String fhirId = "syn-pat-" + UUID.randomUUID().toString().substring(0, 18);

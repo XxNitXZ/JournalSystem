@@ -59,7 +59,7 @@ class CorsConfigTest {
                         .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET"))
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, ALLOWED_ORIGIN))
-                .andExpect(header().string("Access-Control-Allow-Methods", "GET,POST"))
+                .andExpect(header().string("Access-Control-Allow-Methods", "GET,POST,PATCH"))
                 .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"));
 
         mockMvc.perform(options("/api/health")
@@ -67,6 +67,18 @@ class CorsConfigTest {
                         .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "DELETE"))
                 .andExpect(status().isForbidden())
                 .andExpect(header().doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
+    }
+
+    @Test
+    void preflightFromAllowedOriginPermitsProfilePatchWithCsrfHeader() throws Exception {
+        mockMvc.perform(options("/api/auth/profile")
+                        .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "PATCH")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "content-type,x-csrf-token"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, ALLOWED_ORIGIN))
+                .andExpect(header().string("Access-Control-Allow-Methods", "GET,POST,PATCH"))
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"));
     }
 
     @Test
@@ -81,7 +93,7 @@ class CorsConfigTest {
                         "http://localhost:5173"))
                 .andExpect(header().string(
                         "Access-Control-Allow-Methods",
-                        "GET,POST"))
+                        "GET,POST,PATCH"))
                 .andExpect(header().string(
                         "Access-Control-Allow-Headers",
                         "content-type"));

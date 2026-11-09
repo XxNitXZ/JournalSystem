@@ -49,12 +49,12 @@ class AuthenticationControllerTest {
     @ParameterizedTest
     @EnumSource(Role.class)
     void loginPersistsSafePrincipalAndRotatesSessionId(Role role) throws Exception {
-        UserDto user = new UserDto(42L, "user@example.com", role);
+        UserDto user = new UserDto(42L, "user@example.com", role, "Anna", "Testsson");
         when(service.authenticate("user@example.com", "a secure password")).thenReturn(user);
         MockHttpSession session = new MockHttpSession();
         String oldId = session.getId();
         String body = """
-                {"id":42,"email":"user@example.com","role":"%s"}
+                {"id":42,"email":"user@example.com","role":"%s","givenName":"Anna","familyName":"Testsson"}
                 """.formatted(role);
 
         mvc.perform(post("/api/auth/login").session(session).with(request -> {
@@ -75,6 +75,24 @@ class AuthenticationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().json(body, JsonCompareMode.STRICT));
         mvc.perform(get("/api/auth/me")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void anAccountWithoutStoredNamesSignsInWithNullNames() throws Exception {
+        // Accounts created before names were stored (V4) keep working; their names are null, never invented.
+        UserDto user = new UserDto(42L, "user@example.com", Role.STAFF);
+        when(service.authenticate("user@example.com", "a secure password")).thenReturn(user);
+        MockHttpSession session = new MockHttpSession();
+        String body = """
+                {"id":42,"email":"user@example.com","role":"STAFF","givenName":null,"familyName":null}
+                """;
+        mvc.perform(post("/api/auth/login").session(session).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN))
+                .andExpect(status().isOk())
+                .andExpect(content().json(body, JsonCompareMode.STRICT));
+        mvc.perform(get("/api/auth/me").session(session))
+                .andExpect(status().isOk())
+                .andExpect(content().json(body, JsonCompareMode.STRICT));
     }
 
     @Test

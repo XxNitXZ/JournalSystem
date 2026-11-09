@@ -2,11 +2,14 @@ import { ApiError } from '../../services/apiClient.ts'
 
 export function registrationErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.status === 409 && error.code === 'PERSONNUMMER_TAKEN') {
+      return 'An account with this personnummer already exists.'
+    }
     if (error.status === 409) {
       return 'This email address is already registered.'
     }
     if (error.status === 400) {
-      return 'Registration data was rejected. Check your email, password, and role.'
+      return 'Registration data was rejected. Check your name, personnummer, email, phone number, password, and account type.'
     }
     return 'Registration failed. Please try again later.'
   }

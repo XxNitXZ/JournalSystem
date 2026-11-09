@@ -7,6 +7,8 @@ export interface AuthState {
   error: string
   signIn: (request: LoginRequest) => Promise<void>
   signOut: () => Promise<void>
+  /** Adopts a session that MediCore has already started, e.g. after registering a PATIENT account. */
+  acceptSession: (user: UserDto) => void
 }
 
 export const AuthContext = createContext<AuthState | null>(null)

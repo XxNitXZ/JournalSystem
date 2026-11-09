@@ -59,11 +59,11 @@ class SecurityRouteAccessTest {
     @Test
     void publicRegistrationAndLoginRemainAvailableWithCsrf() throws Exception {
         UserDto user = new UserDto(42L, "user@example.com", Role.PATIENT);
-        when(registrationService.register(user.email(), "password", Role.PATIENT)).thenReturn(user);
+        when(registrationService.register(user.email(), "password", Role.PATIENT, "Anna", "Testsson", "182003151236", null)).thenReturn(user);
         when(authenticationService.authenticate(user.email(), "password")).thenReturn(user);
         mvc.perform(post("/api/auth/register").with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"email":"user@example.com","password":"password","role":"PATIENT"}
+                                {"email":"user@example.com","password":"password","role":"PATIENT","givenName":"Anna","familyName":"Testsson","personnummer":"182003151236"}
                                 """))
                 .andExpect(status().isCreated());
         mvc.perform(post("/api/auth/login").with(csrf()).contentType(MediaType.APPLICATION_JSON)

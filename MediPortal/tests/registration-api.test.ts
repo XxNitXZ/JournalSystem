@@ -8,7 +8,8 @@ test('registration sends JSON and preserves API errors', async (context) => {
   try {
     const { registerUser } = await server.ssrLoadModule('/src/features/auth/registrationService.ts')
     const { ApiError, API_BASE_URL } = await server.ssrLoadModule('/src/services/apiClient.ts')
-    const request = { email: 'user@example.com', password: 'a password', role: 'DOCTOR' }
+    const request = { email: 'user@example.com', password: 'a password', role: 'DOCTOR', givenName: 'Anna', familyName: 'Testsson',
+      personnummer: '182003151236' }
     const response = { id: 42, email: request.email, role: request.role }
 
     await context.test('POSTs only registration data and returns the response', async () => {

@@ -49,6 +49,22 @@ class AuthenticationServiceTest {
     }
 
     @Test
+    void returnsStoredNamesAndNullForAccountsWithoutNames() {
+        User named = account(Role.DOCTOR, "a secure password");
+        named.setGivenName("Anna");
+        named.setFamilyName("Testsson");
+        when(repository.findByEmail("patient@example.com")).thenReturn(Optional.of(named));
+        assertThat(service.authenticate("patient@example.com", "a secure password"))
+                .isEqualTo(new UserDto(42L, "patient@example.com", Role.DOCTOR, "Anna", "Testsson"));
+
+        User unnamed = account(Role.PATIENT, "a secure password");
+        when(repository.findByEmail("patient@example.com")).thenReturn(Optional.of(unnamed));
+        UserDto existing = service.authenticate("patient@example.com", "a secure password");
+        assertThat(existing.givenName()).isNull();
+        assertThat(existing.familyName()).isNull();
+    }
+
+    @Test
     void rejectsIncorrectPasswordWithGenericError() {
         User account = account(Role.PATIENT, "a secure password");
         when(repository.findByEmail("patient@example.com")).thenReturn(Optional.of(account));

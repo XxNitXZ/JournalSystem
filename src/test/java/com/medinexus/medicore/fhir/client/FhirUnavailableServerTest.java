@@ -44,6 +44,7 @@ import com.medinexus.medicore.medicalrecord.dto.CreateObservationRequest;
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto.Coding;
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto.Concept;
 import com.medinexus.medicore.organization.dto.OrganizationWriteRequest;
+import com.medinexus.medicore.patient.dto.CreatePatientRequest;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -62,6 +63,8 @@ class FhirUnavailableServerTest {
     private static final int SOCKET_TIMEOUT_MILLIS = 300;
     private static final int HANG_MILLIS = 3_000;
     private static final String SECRET_PATIENT = "secret-patient-77";
+    /** Synthetic test personnummer (Skatteverket's test series); must never appear in messages or logs. */
+    private static final String SYNTHETIC_PERSONNUMMER = "199001012385";
 
     /** One client operation, its fixed operation name and the HTTP requests it sends first. */
     record Operation(String name, String firstMethod, boolean write, Consumer<ApplicationContext> call) {
@@ -91,6 +94,12 @@ class FhirUnavailableServerTest {
     static Stream<Named<Operation>> operations() {
         return Stream.of(
                 op("patient-read", "GET", false, ctx -> ctx.getBean(FhirPatientClient.class).readPatient(SECRET_PATIENT)),
+                op("patient-create", "POST", true, ctx -> ctx.getBean(FhirPatientClient.class).createPatient(
+                        new CreatePatientRequest(SYNTHETIC_PERSONNUMMER, "Secretsson", List.of("Secret"),
+                                CreatePatientRequest.Gender.UNKNOWN, java.time.LocalDate.of(1990, 1, 1)))),
+                op("patient-search", "POST", false, ctx -> ctx.getBean(FhirPatientClient.class).searchPatients(
+                        com.medinexus.medicore.patient.dto.PatientSearchCriteria.parse("Secretsson"),
+                        List.of(SECRET_PATIENT))),
                 op("practitioner-read", "GET", false, ctx -> ctx.getBean(FhirPractitionerClient.class)
                         .readPractitioner("secret-practitioner-77")),
                 op("observation-read", "GET", false, ctx -> ctx.getBean(FhirObservationClient.class)
@@ -228,7 +237,8 @@ class FhirUnavailableServerTest {
 
     /** No identifiers, names, URLs, hosts or server diagnostics; checked without printing the text on failure. */
     private static void assertSafe(String text) {
-        for (String forbidden : List.of("secret", "Secret", "SENSITIVE", "127.0.0.1", "localhost", "/fhir", "http://")) {
+        for (String forbidden : List.of("secret", "Secret", "SENSITIVE", "127.0.0.1", "localhost", "/fhir", "http://",
+                SYNTHETIC_PERSONNUMMER, "9001012385")) {
             assertThat(text.contains(forbidden)).as("contains forbidden text '%s'", forbidden).isFalse();
         }
     }
