@@ -37,6 +37,6 @@ public class AuthenticationService {
         if (!passwordEncoder.matches(password, user.getPasswordHash())) {
             throw new IllegalArgumentException(INVALID_CREDENTIALS);
         }
-        return new UserDto(user.getId(), user.getEmail(), user.getRole());
+        return new UserDto(user.getId(), user.getEmail(), user.getRole(), user.getGivenName(), user.getFamilyName());
     }
 }

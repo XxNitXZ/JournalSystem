@@ -25,6 +25,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import com.medinexus.medicore.support.TestPersonnummer;
 import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.entity.User;
 import com.medinexus.medicore.auth.repository.UserRepository;
@@ -117,7 +118,8 @@ class AccountFhirPatientJourneyIntegrationTest {
     }
 
     private Long register(Role role) {
-        Long id = registration.register("nit-us0306-" + UUID.randomUUID() + "@example.test", password, role).id();
+        Long id = registration.register("nit-us0306-" + UUID.randomUUID() + "@example.test", password, role,
+                "Synthetic", "Testperson", TestPersonnummer.next()).id();
         createdAccounts.add(id);
         return id;
     }

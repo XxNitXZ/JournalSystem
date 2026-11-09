@@ -31,8 +31,13 @@ function AuthProvider({ children }: { children: ReactNode }) {
     setError('')
   }
 
+  function acceptSession(authenticated: UserDto) {
+    setUser(authenticated)
+    setError('')
+  }
+
   return (
-    <AuthContext value={{ user, loading, error, signIn, signOut }}>
+    <AuthContext value={{ user, loading, error, signIn, signOut, acceptSession }}>
       {children}
     </AuthContext>
   )

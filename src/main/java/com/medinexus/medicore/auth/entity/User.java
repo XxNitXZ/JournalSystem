@@ -27,6 +27,20 @@ public class User {
     @Column(nullable = false)
     private Role role;
 
+    @Column(name = "given_name", length = 100)
+    private String givenName;
+
+    @Column(name = "family_name", length = 100)
+    private String familyName;
+
+    /** Normalized 12-digit personnummer; null for accounts created before it was required. */
+    @Column(name = "personnummer", length = 12)
+    private String personnummer;
+
+    /** Optional normalized telephone number (V9); the only phone number MediCore stores. */
+    @Column(name = "phone_number", length = 16)
+    private String phoneNumber;
+
     @Column(name = "fhir_patient_id")
     private String fhirPatientId;
 
@@ -62,6 +76,40 @@ public class User {
 
     public void setRole(Role role) {
         this.role = role;
+    }
+
+    /** First name of the account holder; null for accounts created before names were stored. */
+    public String getGivenName() {
+        return givenName;
+    }
+
+    public void setGivenName(String givenName) {
+        this.givenName = givenName;
+    }
+
+    /** Last name of the account holder; null for accounts created before names were stored. */
+    public String getFamilyName() {
+        return familyName;
+    }
+
+    public void setFamilyName(String familyName) {
+        this.familyName = familyName;
+    }
+
+    public String getPersonnummer() {
+        return personnummer;
+    }
+
+    public void setPersonnummer(String personnummer) {
+        this.personnummer = personnummer;
+    }
+
+    public String getPhoneNumber() {
+        return phoneNumber;
+    }
+
+    public void setPhoneNumber(String phoneNumber) {
+        this.phoneNumber = phoneNumber;
     }
 
     public String getFhirPatientId() {

@@ -80,6 +80,28 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/api/health",
                                 "/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/auth/me").authenticated()
+                        // The signed-in user's own account: read, change e-mail/phone, change password.
+                        .requestMatchers(HttpMethod.GET, "/api/auth/profile").authenticated()
+                        .requestMatchers(HttpMethod.PATCH, "/api/auth/profile").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/password").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/patients").hasAnyRole("DOCTOR", "STAFF")
+                        // Search among MediCore's own Patients; the query is in the body, never in the URL.
+                        .requestMatchers(HttpMethod.POST, "/api/patients/search").hasAnyRole("DOCTOR", "STAFF")
+                        // The PATIENT's own record; must come before the DOCTOR/STAFF rule for /api/patients/*.
+                        .requestMatchers(HttpMethod.GET, "/api/patients/me").hasRole("PATIENT")
+                        // Journal access: PATIENT status and own request; DOCTOR review (list, count, details,
+                        // decisions).
+                        .requestMatchers(HttpMethod.GET, "/api/journal-access/me").hasRole("PATIENT")
+                        .requestMatchers(HttpMethod.POST, "/api/journal-access/me/request").hasRole("PATIENT")
+                        .requestMatchers(HttpMethod.GET, "/api/journal-access-requests", "/api/journal-access-requests/**")
+                                .hasRole("DOCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/journal-access-requests/*/approve",
+                                "/api/journal-access-requests/*/reject", "/api/journal-access-requests/*/reopen")
+                                .hasRole("DOCTOR")
+                        // One Patient by ID only; there is no patient list or search (GET /api/patients stays denied).
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*").hasAnyRole("DOCTOR", "STAFF")
+                        // Name and gender of one registered Patient (US-04.04); never for PATIENT accounts.
+                        .requestMatchers(HttpMethod.PATCH, "/api/patients/*").hasAnyRole("DOCTOR", "STAFF")
                         .anyRequest().denyAll())
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> response.setStatus(401))

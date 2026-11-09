@@ -10,12 +10,20 @@ test('registration error messages', async (context) => {
 
     await context.test('maps HTTP 400 to invalid registration feedback', () => {
       assert.equal(registrationErrorMessage(new ApiError(400, 'Bad Request', '/api/auth/register')),
-        'Registration data was rejected. Check your email, password, and role.')
+        'Registration data was rejected. Check your name, personnummer, email, phone number, password, and account type.')
     })
 
     await context.test('maps HTTP 409 to duplicate email feedback', () => {
       assert.equal(registrationErrorMessage(new ApiError(409, 'Conflict', '/api/auth/register')),
         'This email address is already registered.')
+      assert.equal(registrationErrorMessage(new ApiError(409, 'Conflict', '/api/auth/register', 'OTHER')),
+        'This email address is already registered.')
+    })
+
+    await context.test('maps a taken personnummer to its own feedback without repeating it', () => {
+      const message = registrationErrorMessage(new ApiError(409, 'Conflict', '/api/auth/register', 'PERSONNUMMER_TAKEN'))
+      assert.equal(message, 'An account with this personnummer already exists.')
+      assert.doesNotMatch(message, /\d/)
     })
 
     await context.test('maps other HTTP errors to generic registration feedback', () => {
