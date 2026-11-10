@@ -22,6 +22,7 @@ import com.medinexus.medicore.messaging.dto.MessageConversationResponse;
 import com.medinexus.medicore.messaging.dto.MessageHistoryResponse;
 import com.medinexus.medicore.messaging.dto.MessageRecipientResponse;
 import com.medinexus.medicore.messaging.dto.SendMessageRequest;
+import com.medinexus.medicore.messaging.dto.ReplyMessageRequest;
 import com.medinexus.medicore.messaging.service.MessageRecipientNotFoundException;
 import com.medinexus.medicore.messaging.service.MessageService;
 
@@ -59,6 +60,12 @@ public class MessageController {
     public List<MessageHistoryResponse> inboxThread(@AuthenticationPrincipal UserDto principal,
             @PathVariable Long patientId) {
         return service.inboxThread(principal, patientId);
+    }
+
+    @PostMapping("/inbox/{patientId}/reply")
+    public ResponseEntity<MessageSentResponse> reply(@AuthenticationPrincipal UserDto principal,
+            @PathVariable Long patientId, @RequestBody Map<String, Object> body) {
+        return ResponseEntity.status(201).body(service.reply(principal, patientId, ReplyMessageRequest.from(body)));
     }
 
     @PostMapping

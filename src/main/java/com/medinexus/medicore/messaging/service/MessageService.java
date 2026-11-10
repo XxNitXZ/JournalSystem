@@ -18,6 +18,7 @@ import com.medinexus.medicore.messaging.dto.MessageConversationResponse;
 import com.medinexus.medicore.messaging.dto.MessageHistoryResponse;
 import com.medinexus.medicore.messaging.dto.MessageRecipientResponse;
 import com.medinexus.medicore.messaging.dto.SendMessageRequest;
+import com.medinexus.medicore.messaging.dto.ReplyMessageRequest;
 import com.medinexus.medicore.messaging.entity.Message;
 import com.medinexus.medicore.messaging.repository.MessageRepository;
 
@@ -37,11 +38,10 @@ public class MessageService {
         if (principal == null || principal.id() == null || principal.id() <= 0) throw denied();
         User sender = users.findById(principal.id()).orElseThrow(MessageService::denied);
         if (sender.getRole() != Role.PATIENT) throw denied();
-        if (request == null || request.recipientId() == null || request.recipientId() <= 0
-                || request.content() == null || request.content().isBlank()
-                || request.content().codePointCount(0, request.content().length()) > 5000) {
+        if (request == null || request.recipientId() == null || request.recipientId() <= 0) {
             throw new IllegalArgumentException("Invalid message request");
         }
+        validateContent(request.content());
         if (principal.id().equals(request.recipientId())) throw denied();
         User recipient = users.findById(request.recipientId()).orElseThrow(MessageRecipientNotFoundException::new);
         if (recipient.getRole() != Role.DOCTOR && recipient.getRole() != Role.STAFF) throw denied();
@@ -106,6 +106,27 @@ public class MessageService {
         return messages.findThread(patientId, principal.id()).stream()
                 .map(message -> new MessageHistoryResponse(message.getId(), message.getSenderId(),
                         message.getRecipientId(), message.getContent(), message.getCreatedAt())).toList();
+    }
+
+    @Transactional
+    public MessageSentResponse reply(UserDto principal, Long patientId, ReplyMessageRequest request) {
+        requireProfessional(principal);
+        if (patientId == null || patientId <= 0 || request == null) {
+            throw new IllegalArgumentException("Invalid message request");
+        }
+        validateContent(request.content());
+        if (patientId.equals(principal.id())) throw denied();
+        User patient = users.findById(patientId).orElseThrow(MessageRecipientNotFoundException::new);
+        if (patient.getRole() != Role.PATIENT) throw denied();
+        if (!messages.existsBySenderIdAndRecipientId(patientId, principal.id())) throw denied();
+        Message saved = messages.saveAndFlush(new Message(principal.id(), patientId, request.content()));
+        return new MessageSentResponse(saved.getId(), saved.getCreatedAt());
+    }
+
+    private static void validateContent(String content) {
+        if (content == null || content.isBlank() || content.codePointCount(0, content.length()) > 5000) {
+            throw new IllegalArgumentException("Invalid message request");
+        }
     }
 
     private void requireProfessional(UserDto principal) {
