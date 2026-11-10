@@ -85,6 +85,43 @@ class PatientConversationsIntegrationTest {
     }
 
     @Test
+    void sameProfessionalUrlUsesSessionIdentityDespiteForgedPatientQueryParameters() throws Exception {
+        Long majaSent = message(maja, doctor, "MAJA ONLY", "2026-01-01T00:00:00Z");
+        Long majaReply = message(doctor, maja, "MAJA REPLY", "2026-01-02T00:00:00Z");
+        Long ebbaSent = message(ebba, doctor, "EBBA ONLY", "2026-01-01T00:00:00Z");
+        Long ebbaReply = message(doctor, ebba, "EBBA REPLY", "2026-01-02T00:00:00Z");
+        for (Long patient : List.of(maja, ebba)) {
+            Long other = patient.equals(maja) ? ebba : maja;
+            Long sentId = patient.equals(maja) ? majaSent : ebbaSent;
+            Long replyId = patient.equals(maja) ? majaReply : ebbaReply;
+            String otherName = patient.equals(maja) ? "EBBA" : "MAJA";
+            mvc.perform(get("/api/messages/conversations/" + doctor)
+                            .param("patientId", other.toString()).param("senderId", other.toString())
+                            .param("userId", other.toString()).with(as(patient, Role.PATIENT)))
+                    .andExpect(status().isOk())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.length()").value(2))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$[0].id").value(sentId))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$[1].id").value(replyId))
+                    .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(otherName))));
+        }
+    }
+
+    @Test
+    void replyOnlyConversationRemainsPrivateAndCannotBeSelectedThroughAnotherPatientsId() throws Exception {
+        message(doctor, ebba, "EBBA PRIVATE REPLY", "2026-01-01T00:00:00Z");
+        mvc.perform(get("/api/messages/conversations").param("patientId", ebba.toString()).with(as(maja, Role.PATIENT)))
+                .andExpect(status().isOk()).andExpect(content().json("[]"));
+        mvc.perform(get("/api/messages/conversations").with(as(ebba, Role.PATIENT)))
+                .andExpect(status().isOk()).andExpect(content().json("""
+                        [{"recipientId":%d,"displayName":"Doctor Synthetic","role":"DOCTOR","messageCount":1,"lastMessageAt":"2026-01-01T00:00:00Z"}]
+                        """.formatted(doctor), org.springframework.test.json.JsonCompareMode.STRICT));
+        mvc.perform(get("/api/messages/conversations/" + doctor).with(as(maja, Role.PATIENT)))
+                .andExpect(status().isOk()).andExpect(content().json("[]"));
+        mvc.perform(get("/api/messages/conversations/" + ebba).with(as(maja, Role.PATIENT)))
+                .andExpect(status().isForbidden()).andExpect(content().string(""));
+    }
+
+    @Test
     void listOrdersMostRecentFirst() {
         message(maja, doctor, "Older", "2026-01-01T00:00:00Z");
         message(staff, maja, "Newer", "2026-01-02T00:00:00Z");
