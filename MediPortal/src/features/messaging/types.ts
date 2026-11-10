@@ -13,3 +13,19 @@ export interface MessageSentResponse {
   id: number
   createdAt: string
 }
+
+export interface MessageConversation {
+  recipientId: number
+  displayName: string
+  role: 'DOCTOR' | 'STAFF'
+  messageCount: number
+  lastMessageAt: string
+}
+
+export interface MessageHistory {
+  id: number
+  senderId: number
+  recipientId: number
+  content: string
+  createdAt: string
+}

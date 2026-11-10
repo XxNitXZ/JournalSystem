@@ -86,6 +86,7 @@ function MessageComposer() {
         {directory.status === 'failed' && <Alert tone="error" role="alert">{directory.error}</Alert>}
         {directory.status === 'loaded' && <MessageComposerForm recipients={directory.recipients} />}
       </Card>
+      <p><Link to="/patient/messages" className="text-link">View your conversations</Link></p>
       <p><Link to="/patient" className="text-link">Back to dashboard</Link></p>
     </section>
   )

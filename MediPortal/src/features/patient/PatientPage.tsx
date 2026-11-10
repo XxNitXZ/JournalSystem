@@ -40,7 +40,7 @@ function PatientPage() {
       </div>
 
       <Alert tone="info">
-        <Link to="/patient/messages/new" className="text-link">Send a message to a doctor or staff member</Link>
+        <Link to="/patient/messages/new" className="text-link">Send a message to a doctor or staff member</Link> · <Link to="/patient/messages" className="text-link">View your conversations</Link>
       </Alert>
     </section>
   )
