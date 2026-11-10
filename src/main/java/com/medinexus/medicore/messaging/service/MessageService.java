@@ -13,6 +13,7 @@ import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.entity.User;
 import com.medinexus.medicore.auth.repository.UserRepository;
 import com.medinexus.medicore.messaging.dto.MessageSentResponse;
+import com.medinexus.medicore.messaging.dto.MessageInboxResponse;
 import com.medinexus.medicore.messaging.dto.MessageConversationResponse;
 import com.medinexus.medicore.messaging.dto.MessageHistoryResponse;
 import com.medinexus.medicore.messaging.dto.MessageRecipientResponse;
@@ -86,6 +87,33 @@ public class MessageService {
                         message.getRecipientId(), message.getContent(), message.getCreatedAt())).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<MessageInboxResponse> inbox(UserDto principal) {
+        requireProfessional(principal);
+        return messages.findInbox(principal.id()).stream().map(summary ->
+                new MessageInboxResponse(summary.getPatient().getId(), displayName(summary.getPatient()),
+                        summary.getMessageCount(), summary.getLastMessageAt())).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageHistoryResponse> inboxThread(UserDto principal, Long patientId) {
+        requireProfessional(principal);
+        if (patientId == null || patientId <= 0) throw new IllegalArgumentException("Invalid patient");
+        if (patientId.equals(principal.id())) throw denied();
+        User patient = users.findById(patientId).orElseThrow(MessageRecipientNotFoundException::new);
+        if (patient.getRole() != Role.PATIENT) throw denied();
+        if (!messages.existsBySenderIdAndRecipientId(patientId, principal.id())) return List.of();
+        return messages.findThread(patientId, principal.id()).stream()
+                .map(message -> new MessageHistoryResponse(message.getId(), message.getSenderId(),
+                        message.getRecipientId(), message.getContent(), message.getCreatedAt())).toList();
+    }
+
+    private void requireProfessional(UserDto principal) {
+        if (principal == null || principal.id() == null || principal.id() <= 0) throw denied();
+        User account = users.findById(principal.id()).orElseThrow(MessageService::denied);
+        if (account.getRole() != Role.DOCTOR && account.getRole() != Role.STAFF) throw denied();
+    }
+
     private void requirePatient(UserDto principal) {
         if (principal == null || principal.id() == null || principal.id() <= 0) throw denied();
         User account = users.findById(principal.id()).orElseThrow(MessageService::denied);
@@ -97,7 +125,8 @@ public class MessageService {
                 .filter(part -> part != null && !part.isBlank()).map(String::strip)
                 .collect(java.util.stream.Collectors.joining(" "));
         if (!name.isEmpty()) return name;
-        return (user.getRole() == Role.DOCTOR ? "Doctor" : "Staff") + " #" + user.getId();
+        return (user.getRole() == Role.DOCTOR ? "Doctor" : user.getRole() == Role.STAFF ? "Staff" : "Patient")
+                + " #" + user.getId();
     }
 
     private static AccessDeniedException denied() {

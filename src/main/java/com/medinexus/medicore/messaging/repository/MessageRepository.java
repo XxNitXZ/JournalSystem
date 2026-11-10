@@ -17,6 +17,27 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
         Instant getLastMessageAt();
     }
 
+    interface InboxSummary {
+        User getPatient();
+        Long getMessageCount();
+        Instant getLastMessageAt();
+    }
+
+    @Query("""
+            SELECT u AS patient, COUNT(m) AS messageCount, MAX(m.createdAt) AS lastMessageAt
+            FROM Message m, User u
+            WHERE ((m.senderId = :professionalId AND m.recipientId = u.id)
+                OR (m.recipientId = :professionalId AND m.senderId = u.id))
+              AND u.role = com.medinexus.medicore.auth.entity.Role.PATIENT
+              AND EXISTS (SELECT incoming.id FROM Message incoming
+                  WHERE incoming.senderId = u.id AND incoming.recipientId = :professionalId)
+            GROUP BY u
+            ORDER BY MAX(m.createdAt) DESC, u.id ASC
+            """)
+    List<InboxSummary> findInbox(@Param("professionalId") Long professionalId);
+
+    boolean existsBySenderIdAndRecipientId(Long senderId, Long recipientId);
+
     @Query("""
             SELECT u AS professional, COUNT(m) AS messageCount, MAX(m.createdAt) AS lastMessageAt
             FROM Message m, User u

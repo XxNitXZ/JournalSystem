@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.messaging.dto.MessageSentResponse;
+import com.medinexus.medicore.messaging.dto.MessageInboxResponse;
 import com.medinexus.medicore.messaging.dto.MessageConversationResponse;
 import com.medinexus.medicore.messaging.dto.MessageHistoryResponse;
 import com.medinexus.medicore.messaging.dto.MessageRecipientResponse;
@@ -47,6 +48,17 @@ public class MessageController {
     public List<MessageHistoryResponse> thread(@AuthenticationPrincipal UserDto principal,
             @PathVariable Long recipientId) {
         return service.thread(principal, recipientId);
+    }
+
+    @GetMapping("/inbox")
+    public List<MessageInboxResponse> inbox(@AuthenticationPrincipal UserDto principal) {
+        return service.inbox(principal);
+    }
+
+    @GetMapping("/inbox/{patientId}")
+    public List<MessageHistoryResponse> inboxThread(@AuthenticationPrincipal UserDto principal,
+            @PathVariable Long patientId) {
+        return service.inboxThread(principal, patientId);
     }
 
     @PostMapping
