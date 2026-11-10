@@ -55,7 +55,7 @@ test('shared authentication drives patient navigation and routes', async (contex
         assert.ok(html.includes(`href="/${page}"`))
         assert.ok(html.includes(`>${title}</h1>`))
         assert.match(html, /patient@example.com/)
-        assert.match(html, /future release/)
+        assert.match(html, page === 'patient' ? /Send a message to a doctor or staff member/ : /future release/)
         for (const other of ['patient', 'doctor', 'staff'].filter((value) => value !== page)) {
           assert.ok(!html.includes(`href="/${other}"`))
           const denied = renderRoute({ ...state, user: { ...patient, role } }, `/${other}`)
@@ -93,11 +93,11 @@ test('shared authentication drives patient navigation and routes', async (contex
       assert.doesNotMatch(html, /patient-journal-access|Secure messaging/)
     })
 
-    await context.test('patients see the navigation link and placeholder', () => {
+    await context.test('patients see navigation and the message composer link', () => {
       const html = renderRoute({ ...state, user: patient })
       assert.match(html, /href="\/patient"/)
       assert.match(html, /patient@example.com/)
-      assert.match(html, /Secure messaging will be available in a future release/)
+      assert.match(html, /href="\/patient\/messages\/new"/)
       // The journal access card is shown and loads the status after mounting.
       assert.match(html, /<h2 id="patient-journal-access">Medical record<\/h2>/)
       assert.match(html, /Checking your medical record access/)

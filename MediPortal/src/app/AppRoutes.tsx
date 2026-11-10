@@ -1,4 +1,5 @@
 import { Route, Routes } from 'react-router'
+import MessageComposer from '../features/messaging/MessageComposer.tsx'
 import AppLayout from '../components/layout/AppLayout.tsx'
 import HomePage from '../pages/HomePage.tsx'
 import NotFoundPage from '../pages/NotFoundPage.tsx'
@@ -23,6 +24,7 @@ function AppRoutes() {
         <Route path="login" element={<LoginForm />} />
         <Route element={<ProtectedRoute role="PATIENT" />}>
           <Route path="patient" element={<PatientPage />} />
+          <Route path="patient/messages/new" element={<MessageComposer />} />
           <Route path="patient/record" element={<MyMedicalRecordPage />} />
         </Route>
         <Route element={<ProtectedRoute role="DOCTOR" />}>

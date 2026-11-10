@@ -1,5 +1,9 @@
 package com.medinexus.medicore.messaging.service;
 
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Stream;
+
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -9,6 +13,7 @@ import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.entity.User;
 import com.medinexus.medicore.auth.repository.UserRepository;
 import com.medinexus.medicore.messaging.dto.MessageSentResponse;
+import com.medinexus.medicore.messaging.dto.MessageRecipientResponse;
 import com.medinexus.medicore.messaging.dto.SendMessageRequest;
 import com.medinexus.medicore.messaging.entity.Message;
 import com.medinexus.medicore.messaging.repository.MessageRepository;
@@ -39,6 +44,29 @@ public class MessageService {
         if (recipient.getRole() != Role.DOCTOR && recipient.getRole() != Role.STAFF) throw denied();
         Message saved = messages.saveAndFlush(new Message(principal.id(), request.recipientId(), request.content()));
         return new MessageSentResponse(saved.getId(), saved.getCreatedAt());
+    }
+
+    /** Directory access also checks the persisted role, rather than trusting the session snapshot. */
+    @Transactional(readOnly = true)
+    public List<MessageRecipientResponse> recipients(UserDto principal) {
+        if (principal == null || principal.id() == null || principal.id() <= 0) throw denied();
+        User account = users.findById(principal.id()).orElseThrow(MessageService::denied);
+        if (account.getRole() != Role.PATIENT) throw denied();
+        return users.findByRoleIn(List.of(Role.DOCTOR, Role.STAFF)).stream()
+                .map(user -> new MessageRecipientResponse(user.getId(), displayName(user), user.getRole()))
+                .sorted(Comparator.comparing(MessageRecipientResponse::displayName, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing(MessageRecipientResponse::displayName)
+                        .thenComparing(MessageRecipientResponse::role)
+                        .thenComparing(MessageRecipientResponse::id))
+                .toList();
+    }
+
+    private static String displayName(User user) {
+        String name = Stream.of(user.getGivenName(), user.getFamilyName())
+                .filter(part -> part != null && !part.isBlank()).map(String::strip)
+                .collect(java.util.stream.Collectors.joining(" "));
+        if (!name.isEmpty()) return name;
+        return (user.getRole() == Role.DOCTOR ? "Doctor" : "Staff") + " #" + user.getId();
     }
 
     private static AccessDeniedException denied() {

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -148,6 +149,80 @@ class MessageControllerTest {
     void rejectsSelfRecipient() throws Exception {
         account(1L, Role.PATIENT);
         rejected("{\"recipientId\":1,\"content\":\"Synthetic\"}", 403);
+    }
+
+    @Test
+    void discoversRecipientsInStableOrderWithOnlyPublicDirectoryFields() throws Exception {
+        account(1L, Role.PATIENT);
+        User doctor = directoryAccount(2L, Role.DOCTOR, " Zoe ", "Smith");
+        User staff = directoryAccount(3L, Role.STAFF, "Amy", null);
+        User unnamed = directoryAccount(4L, Role.DOCTOR, null, " ");
+        User sameName = directoryAccount(5L, Role.DOCTOR, "Amy", null);
+        User familyOnly = directoryAccount(6L, Role.STAFF, " ", "Brown");
+        when(users.findByRoleIn(List.of(Role.DOCTOR, Role.STAFF)))
+                .thenReturn(List.of(doctor, sameName, unnamed, familyOnly, staff));
+        mvc.perform(get("/api/messages/recipients").with(signedIn(Role.PATIENT)))
+                .andExpect(status().isOk()).andExpect(content().json("""
+                        [{"id":5,"displayName":"Amy","role":"DOCTOR"},
+                         {"id":3,"displayName":"Amy","role":"STAFF"},
+                         {"id":6,"displayName":"Brown","role":"STAFF"},
+                         {"id":4,"displayName":"Doctor #4","role":"DOCTOR"},
+                         {"id":2,"displayName":"Zoe Smith","role":"DOCTOR"}]
+                        """, org.springframework.test.json.JsonCompareMode.STRICT));
+        verifyNoInteractions(messages);
+    }
+
+    @Test
+    void emptyDirectoryReturnsEmptyArray() throws Exception {
+        account(1L, Role.PATIENT);
+        when(users.findByRoleIn(List.of(Role.DOCTOR, Role.STAFF))).thenReturn(List.of());
+        mvc.perform(get("/api/messages/recipients").with(signedIn(Role.PATIENT)))
+                .andExpect(status().isOk()).andExpect(content().json("[]"));
+    }
+
+    @Test
+    void anonymousCannotDiscoverRecipients() throws Exception {
+        mvc.perform(get("/api/messages/recipients")).andExpect(status().isUnauthorized());
+        verifyNoInteractions(users, messages);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = Role.class, names = {"DOCTOR", "STAFF"})
+    void professionalSessionsCannotDiscoverRecipients(Role role) throws Exception {
+        mvc.perform(get("/api/messages/recipients").with(signedIn(role)))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(users, messages);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = Role.class, names = {"DOCTOR", "STAFF"})
+    void stalePatientSessionCannotDiscoverRecipients(Role role) throws Exception {
+        account(1L, role);
+        mvc.perform(get("/api/messages/recipients").with(signedIn(Role.PATIENT)))
+                .andExpect(status().isForbidden()).andExpect(content().string(""));
+        org.mockito.Mockito.verify(users, org.mockito.Mockito.never()).findByRoleIn(any());
+    }
+
+    @Test
+    void deletedPatientCannotDiscoverRecipients() throws Exception {
+        when(users.findById(1L)).thenReturn(Optional.empty());
+        mvc.perform(get("/api/messages/recipients").with(signedIn(Role.PATIENT)))
+                .andExpect(status().isForbidden());
+        org.mockito.Mockito.verify(users, org.mockito.Mockito.never()).findByRoleIn(any());
+    }
+
+    private User directoryAccount(Long id, Role role, String given, String family) {
+        User user = new User();
+        ReflectionTestUtils.setField(user, "id", id);
+        user.setRole(role);
+        user.setGivenName(given);
+        user.setFamilyName(family);
+        user.setEmail("PRIVATE@example.test");
+        user.setPasswordHash("PRIVATE-HASH");
+        user.setPersonnummer("PRIVATE-PERSONNUMMER");
+        user.setPhoneNumber("PRIVATE-PHONE");
+        user.setFhirPractitionerId("PRIVATE-FHIR-ID");
+        return user;
     }
 
     private void rejected(String body, int status) throws Exception {

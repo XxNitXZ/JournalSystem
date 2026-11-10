@@ -21,6 +21,26 @@ class UserRepositoryIntegrationTest {
     private UserRepository userRepository;
 
     @Test
+    void recipientQueryIncludesOnlyPersistedProfessionalRoles() {
+        java.util.List<Long> professionalIds = new java.util.ArrayList<>();
+        Long patientId = null;
+        for (Role role : Role.values()) {
+            User user = new User();
+            user.setEmail(java.util.UUID.randomUUID() + "@example.test");
+            user.setPasswordHash("synthetic-hash");
+            user.setRole(role);
+            Long id = userRepository.saveAndFlush(user).getId();
+            if (role == Role.PATIENT) patientId = id;
+            else professionalIds.add(id);
+        }
+        java.util.List<User> recipients = userRepository.findByRoleIn(java.util.List.of(Role.DOCTOR, Role.STAFF));
+        org.assertj.core.api.Assertions.assertThat(recipients).allMatch(user ->
+                user.getRole() == Role.DOCTOR || user.getRole() == Role.STAFF);
+        org.assertj.core.api.Assertions.assertThat(recipients).extracting(User::getId)
+                .containsAll(professionalIds).doesNotContain(patientId);
+    }
+
+    @Test
     void shouldSaveAndFindUserByEmail() {
         User user = new User();
         user.setEmail("repository-test@example.com");

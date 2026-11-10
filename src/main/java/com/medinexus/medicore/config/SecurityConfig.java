@@ -84,6 +84,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/auth/profile").authenticated()
                         .requestMatchers(HttpMethod.PATCH, "/api/auth/profile").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/auth/password").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/messages/recipients").hasRole("PATIENT")
                         .requestMatchers(HttpMethod.POST, "/api/messages").hasRole("PATIENT")
                         .requestMatchers(HttpMethod.POST, "/api/patients").hasAnyRole("DOCTOR", "STAFF")
                         // Search among MediCore's own Patients; the query is in the body, never in the URL.

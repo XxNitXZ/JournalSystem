@@ -40,7 +40,7 @@ function PatientPage() {
       </div>
 
       <Alert tone="info">
-        Secure messaging will be available in a future release.
+        <Link to="/patient/messages/new" className="text-link">Send a message to a doctor or staff member</Link>
       </Alert>
     </section>
   )

@@ -1,4 +1,4 @@
-import { ClipboardCheck, LayoutDashboard, UserPlus, UserRound, type LucideIcon } from 'lucide-react'
+import { ClipboardCheck, Send, LayoutDashboard, UserPlus, UserRound, type LucideIcon } from 'lucide-react'
 import { NavLink } from 'react-router'
 import CountBadge from '../ui/CountBadge.tsx'
 import { useAuth } from '../../features/auth/AuthContext.ts'
@@ -19,7 +19,7 @@ interface NavItem {
 function itemsFor(role: Role): NavItem[] {
   const dashboard: NavItem = { to: dashboardPath(role), label: 'Dashboard', icon: LayoutDashboard, end: true }
   const account: NavItem = { to: '/login', label: 'My account', icon: UserRound }
-  if (role === 'PATIENT') return [dashboard, account]
+  if (role === 'PATIENT') return [dashboard, { to: '/patient/messages/new', label: 'Send a message', icon: Send }, account]
   const register: NavItem = { to: '/patients/new', label: 'Register patient', icon: UserPlus }
   if (role === 'STAFF') return [dashboard, register, account]
   const requests: NavItem = { to: '/doctor/journal-requests', label: 'Journal requests', icon: ClipboardCheck, pendingCount: true }

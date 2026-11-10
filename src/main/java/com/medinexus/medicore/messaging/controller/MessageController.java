@@ -1,12 +1,14 @@
 package com.medinexus.medicore.messaging.controller;
 
 import java.util.Map;
+import java.util.List;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.messaging.dto.MessageSentResponse;
+import com.medinexus.medicore.messaging.dto.MessageRecipientResponse;
 import com.medinexus.medicore.messaging.dto.SendMessageRequest;
 import com.medinexus.medicore.messaging.service.MessageRecipientNotFoundException;
 import com.medinexus.medicore.messaging.service.MessageService;
@@ -25,6 +28,11 @@ public class MessageController {
 
     public MessageController(MessageService service) {
         this.service = service;
+    }
+
+    @GetMapping("/recipients")
+    public List<MessageRecipientResponse> recipients(@AuthenticationPrincipal UserDto principal) {
+        return service.recipients(principal);
     }
 
     @PostMapping

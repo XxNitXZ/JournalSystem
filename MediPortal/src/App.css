@@ -645,7 +645,8 @@ fieldset:disabled .btn {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   min-width: 0;
   height: 46px;
@@ -658,25 +659,35 @@ fieldset:disabled .btn {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+.field textarea {
+  height: auto;
+  min-height: 12rem;
+  padding: var(--space-3);
+  resize: vertical;
+}
+
 .field input::placeholder {
   color: var(--color-text-muted);
   opacity: 0.8;
 }
 
 .field input:hover,
-.field select:hover {
+.field select:hover,
+.field textarea:hover {
   border-color: var(--color-text-muted);
 }
 
 .field input:focus-visible,
-.field select:focus-visible {
+.field select:focus-visible,
+.field textarea:focus-visible {
   outline: none;
   border-color: var(--color-focus);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 25%, transparent);
 }
 
 .field input:disabled,
-.field select:disabled {
+.field select:disabled,
+.field textarea:disabled {
   background: var(--color-surface-muted);
 }
 

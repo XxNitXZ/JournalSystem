@@ -18,6 +18,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByEmail(String email);
 
+    List<User> findByRoleIn(List<Role> roles);
+
     /** True if an account is linked to this FHIR Patient (operator provisioning or an approved journal request). */
     boolean existsByFhirPatientId(String fhirPatientId);
 
