@@ -80,6 +80,12 @@ class MessageReplyIntegrationTest {
                     .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.length()").value(2))
                     .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$[1].content").value(" Synthetic reply "));
         }
+        Long otherProfessional = role == Role.DOCTOR ? staff : doctor;
+        Role otherRole = role == Role.DOCTOR ? Role.STAFF : Role.DOCTOR;
+        mvc.perform(get("/api/messages/inbox/" + maja).with(as(otherProfessional, otherRole)))
+                .andExpect(status().isOk()).andExpect(content().json("[]"));
+        mvc.perform(get("/api/messages/conversations/" + professional).with(as(ebba, Role.PATIENT)))
+                .andExpect(status().isOk()).andExpect(content().json("[]"));
         assertThat(messages.findInbox(professional).get(0).getMessageCount()).isEqualTo(2);
         assertThat(messages.findConversations(maja).get(0).getMessageCount()).isEqualTo(2);
     }
@@ -141,6 +147,38 @@ class MessageReplyIntegrationTest {
                 .andExpect(status().isForbidden());
         mvc.perform(post(path(maja)).with(as(doctor, Role.DOCTOR)).with(csrf().useInvalidToken()).contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"text\"}"))
                 .andExpect(status().isForbidden());
+        assertThat(messages.count()).isEqualTo(before);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = Role.class, names = {"DOCTOR", "STAFF"})
+    void forgedQueryIdentityCannotAuthorizeReplyToAnotherProfessionalsConversation(Role role) throws Exception {
+        Long caller = role == Role.DOCTOR ? doctor : staff;
+        Long owner = role == Role.DOCTOR ? staff : doctor;
+        message(maja, owner, "Private incoming message", "2026-01-01T00:00:00Z");
+        long before = messages.count();
+        mvc.perform(post(path(maja)).with(as(caller, role)).with(csrf())
+                        .param("senderId", owner.toString()).param("professionalId", owner.toString())
+                        .param("patientId", ebba.toString()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"Unauthorized reply\"}"))
+                .andExpect(status().isForbidden()).andExpect(content().string(""));
+        assertThat(messages.count()).isEqualTo(before);
+        assertThat(messages.findThread(maja, caller)).isEmpty();
+    }
+
+    @Test
+    void rejectedPatientSendsDoNotPersistAgainstRealDatabase() throws Exception {
+        long before = messages.count();
+        for (Long recipient : List.of(maja, ebba)) {
+            mvc.perform(post("/api/messages").with(as(maja, Role.PATIENT)).with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"recipientId\":" + recipient + ",\"content\":\"Forbidden patient target\"}"))
+                    .andExpect(status().isForbidden());
+        }
+        mvc.perform(post("/api/messages").with(as(maja, Role.PATIENT)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"recipientId\":9223372036854775807,\"content\":\"Unknown target\"}"))
+                .andExpect(status().isNotFound());
         assertThat(messages.count()).isEqualTo(before);
     }
 
