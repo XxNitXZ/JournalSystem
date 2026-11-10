@@ -1,4 +1,4 @@
-import { ClipboardCheck, FolderSearch, Stethoscope, UserPlus, Users, type LucideIcon } from 'lucide-react'
+import { ClipboardCheck, Inbox, FolderSearch, Stethoscope, UserPlus, Users, type LucideIcon } from 'lucide-react'
 import ActionCard from '../../components/ui/ActionCard.tsx'
 import Alert from '../../components/ui/Alert.tsx'
 import Card from '../../components/ui/Card.tsx'
@@ -46,6 +46,7 @@ function ClinicalDashboard({ role }: ClinicalDashboardProps) {
 
       <div className="card-grid">
         <ActionCard to="/patients/new" title="Register a patient" description={text.register} icon={UserPlus} />
+        <ActionCard to={`/${role}/inbox`} title="Patient inbox" description="Read messages from your patients." icon={Inbox} />
         {role === 'doctor' && (
           <ActionCard to="/doctor/journal-requests" title="Journal access requests" icon={ClipboardCheck}
             description="Review patients asking for access to their medical record."
@@ -57,7 +58,7 @@ function ClinicalDashboard({ role }: ClinicalDashboardProps) {
       </div>
 
       <Alert tone="info">
-        Further clinical functionality, such as medical records and messaging, will be available in a future release.
+        Further clinical functionality, such as medical records, will be available in a future release.
       </Alert>
     </section>
   )

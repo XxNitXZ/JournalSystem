@@ -5,6 +5,7 @@ import Alert from '../../components/ui/Alert.tsx'
 import Card from '../../components/ui/Card.tsx'
 import LoadingState from '../../components/ui/LoadingState.tsx'
 import PageHeader from '../../components/ui/PageHeader.tsx'
+import { MessageHistoryView } from './MessageHistoryView.tsx'
 import { useAuth } from '../auth/AuthContext.ts'
 import { getConversations, getConversationMessages } from './messageService.ts'
 import { conversationError, messageTime } from './conversationText.ts'
@@ -26,23 +27,6 @@ export function ConversationList({ conversations, selected }: { conversations: M
   </ul>
 }
 
-export function MessageHistoryView({ messages, patientId, professionalName }: {
-  messages: MessageHistory[]; patientId: number; professionalName: string
-}) {
-  if (!messages.length) return <Alert tone="info" role="status">There are no messages in this conversation.</Alert>
-  // Preserve backend ordering, including PostgreSQL microsecond precision.
-  return <ol className="message-history" aria-label="Message history">
-    {messages.map((message) => {
-      const own = message.senderId === patientId
-      return <li key={message.id} className={`message-entry ${own ? 'message-entry--own' : ''}`}>
-        <p className="message-entry__heading"><strong>{own ? 'You' : professionalName}</strong>
-          <span>{own ? 'Sent' : 'Reply'} · <time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time></span>
-        </p>
-        <p className="message-entry__content">{message.content}</p>
-      </li>
-    })}
-  </ol>
-}
 
 function ConversationThread({ conversation, patientId }: { conversation: MessageConversation; patientId: number }) {
   const [state, setState] = useState<LoadState<MessageHistory[]>>({ status: 'loading' })
@@ -58,7 +42,7 @@ function ConversationThread({ conversation, patientId }: { conversation: Message
   return <Card title={`${conversation.displayName} · ${conversation.role === 'DOCTOR' ? 'Doctor' : 'Staff'}`} titleId="thread-title">
     {state.status === 'loading' && <LoadingState label="Loading conversation…" />}
     {state.status === 'error' && <Alert tone="error" role="alert">{state.error}</Alert>}
-    {state.status === 'loaded' && <MessageHistoryView messages={state.data} patientId={patientId} professionalName={conversation.displayName} />}
+    {state.status === 'loaded' && <MessageHistoryView messages={state.data} currentUserId={patientId} otherName={conversation.displayName} />}
   </Card>
 }
 

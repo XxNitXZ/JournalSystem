@@ -25,9 +25,10 @@ function itemsFor(role: Role): NavItem[] {
   { to: '/patient/messages/new', label: 'Send a message', icon: Send }, account
   ]
   const register: NavItem = { to: '/patients/new', label: 'Register patient', icon: UserPlus }
-  if (role === 'STAFF') return [dashboard, register, account]
+  const inbox: NavItem = { to: `/${role.toLowerCase()}/inbox`, label: 'Patient inbox', icon: MessagesSquare }
+  if (role === 'STAFF') return [dashboard, register, inbox, account]
   const requests: NavItem = { to: '/doctor/journal-requests', label: 'Journal requests', icon: ClipboardCheck, pendingCount: true }
-  return [dashboard, register, requests, account]
+  return [dashboard, register, inbox, requests, account]
 }
 
 const pendingLabel = (count: number) => `, ${count} awaiting review`

@@ -1,4 +1,5 @@
 import { Route, Routes } from 'react-router'
+import ClinicianInbox from '../features/messaging/ClinicianInbox.tsx'
 import PatientMessages from '../features/messaging/PatientMessages.tsx'
 import MessageComposer from '../features/messaging/MessageComposer.tsx'
 import AppLayout from '../components/layout/AppLayout.tsx'
@@ -31,11 +32,15 @@ function AppRoutes() {
           <Route path="patient/record" element={<MyMedicalRecordPage />} />
         </Route>
         <Route element={<ProtectedRoute role="DOCTOR" />}>
+          <Route path="doctor/inbox" element={<ClinicianInbox />} />
+          <Route path="doctor/inbox/:patientId" element={<ClinicianInbox />} />
           <Route path="doctor" element={<DoctorPage />} />
           <Route path="doctor/journal-requests" element={<JournalAccessRequestsPage />} />
           <Route path="doctor/journal-requests/:id" element={<JournalAccessReviewPage />} />
         </Route>
         <Route element={<ProtectedRoute role="STAFF" />}>
+          <Route path="staff/inbox" element={<ClinicianInbox />} />
+          <Route path="staff/inbox/:patientId" element={<ClinicianInbox />} />
           <Route path="staff" element={<StaffPage />} />
         </Route>
         <Route element={<ProtectedRoute roles={['DOCTOR', 'STAFF']} />}>

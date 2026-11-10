@@ -16,3 +16,11 @@ export function getConversations(options?: ApiRequestOptions): Promise<import('.
 export function getConversationMessages(recipientId: number, options?: ApiRequestOptions): Promise<import('./types.ts').MessageHistory[]> {
   return apiGet(`/api/messages/conversations/${encodeURIComponent(recipientId)}`, options)
 }
+
+export function getProfessionalInbox(options?: ApiRequestOptions): Promise<import('./types.ts').MessageInboxConversation[]> {
+  return apiGet('/api/messages/inbox', options)
+}
+
+export function getInboxMessages(patientId: number, options?: ApiRequestOptions): Promise<import('./types.ts').MessageHistory[]> {
+  return apiGet(`/api/messages/inbox/${encodeURIComponent(patientId)}`, options)
+}

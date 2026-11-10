@@ -29,3 +29,10 @@ export interface MessageHistory {
   content: string
   createdAt: string
 }
+
+export interface MessageInboxConversation {
+  patientId: number
+  displayName: string
+  messageCount: number
+  lastMessageAt: string
+}
