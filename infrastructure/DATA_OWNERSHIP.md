@@ -8,9 +8,11 @@ of data has exactly **one authoritative owner**:
   Practitioner, Observation, Condition, Encounter, Organization and Location.
 - **PostgreSQL owns local accounts**: login identity, the account holder's first
   and last name and personnummer, phone number, password hash, role and the logical IDs that link an account to its FHIR Patient or Practitioner,
-  plus journal access requests (which account asks for which FHIR Patient, and the doctor's decision).
+  plus journal access requests (which account asks for which FHIR Patient, and the doctor's decision)
+  and user-authored messages between local accounts.
 
-Clinical data is never stored, cached or synchronized in PostgreSQL. This
+FHIR clinical resources are never stored, cached or synchronized in PostgreSQL. Local message content
+may contain sensitive user-authored information; it is not a copy or synchronization of FHIR records. This
 document describes the code as it is; the [last section](#how-this-was-verified)
 explains how it was checked.
 
@@ -23,7 +25,7 @@ explains how it was checked.
 | Journal access requests (US-04.03) | PostgreSQL | table `journal_access_requests` (account ID, FHIR Patient logical ID or none yet, status, reviewer, times) | implemented (V7, V8) |
 | Technical persistence check | PostgreSQL | table `persistence_check` (no application data) | implemented |
 | Schema history | PostgreSQL (Flyway) | table `flyway_schema_history` | implemented |
-| Messages between users | PostgreSQL | – | **planned**, not implemented |
+| Messages between users | PostgreSQL | `messages` (sender/recipient account IDs, content, creation time) | persistence implemented (V10); sending, reading and authorization flows not yet implemented |
 | Patient | HAPI FHIR | KTH server | implemented (read; register via `POST /api/patients`, US-04.01; profile via `GET /api/patients/{id}`, US-04.02; search via `POST /api/patients/search`; own record via `GET /api/patients/me`, US-04.03; gender updated via `PATCH /api/patients/{id}`, US-04.04), limited to Patients in `registered_patients` or linked to an account |
 | Practitioner | HAPI FHIR | KTH server | implemented (read) |
 | Observation, Condition, Encounter | HAPI FHIR | KTH server | implemented (read, create, search by patient) |
@@ -42,12 +44,15 @@ Hibernate never changes it (`spring.jpa.hibernate.ddl-auto=none`).
 | `registered_patients` | `fhir_patient_id` (primary key), `registered_by` (account, `ON DELETE SET NULL`), `registered_at` | Logical IDs of the Patients that MediCore registered in FHIR; no patient data | V5 |
 | `journal_access_requests` | `id`, `user_id` (account, `ON DELETE CASCADE`), `fhir_patient_id` (references `registered_patients`, `ON DELETE RESTRICT`; `NULL` only while `AWAITING_RECORD`), `status` (`AWAITING_RECORD`, `PENDING`, `APPROVED`, `REJECTED`), `reviewed_by` (account, `ON DELETE SET NULL`), `created_at`, `reviewed_at` | A PATIENT account's own request for access to its journal (created only when the patient asks), the FHIR Patient with the same personnummer once registered, and the doctor's decision; at most one open (`AWAITING_RECORD`/`PENDING`) request per account (partial unique index) | V7, V8 |
 | `flyway_schema_history` | (Flyway) | Applied migrations | – |
+| `messages` | `id`, `sender_id`, `recipient_id`, `content`, `created_at` | Local user-authored messages; distinct participants, restrictive account foreign keys, nonblank content up to 5,000 characters, creation timestamp immutable through JPA | V10 |
 
-There are four JPA entities, `auth/entity/User`,
+There are five JPA entities, `auth/entity/User`,
 `persistence/entity/PersistenceCheck`, `patient/registry/RegisteredPatient` and
-`journalaccess/JournalAccessRequest`, and four repositories, `UserRepository`,
+`journalaccess/JournalAccessRequest` and `messaging/entity/Message`, and five repositories, `UserRepository`,
 `IPersistenceCheckRepository`, `RegisteredPatientRepository` and
-`JournalAccessRequestRepository`. Data is written to PostgreSQL only by:
+`JournalAccessRequestRepository` and `MessageRepository`. Message persistence has no application service or
+endpoint yet; content must not be logged, and future access must be limited to authorized participants.
+Existing application writes to PostgreSQL are performed by:
 
 - `RegistrationService`: creates an account (e-mail, first and last name, personnummer, password hash, role);
   the personnummer is required for every new account, validated like a Patient's (12 digits, a real date, no check-digit validation, not in
