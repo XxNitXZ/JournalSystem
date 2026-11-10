@@ -5,8 +5,8 @@ export function getMessageRecipients(options?: ApiRequestOptions): Promise<Messa
   return apiGet<MessageRecipient[]>('/api/messages/recipients', options)
 }
 
-export function sendMessage(request: SendMessageRequest): Promise<MessageSentResponse> {
-  return apiPost<MessageSentResponse>('/api/messages', { recipientId: request.recipientId, content: request.content })
+export function sendMessage(request: SendMessageRequest, options?: ApiRequestOptions): Promise<MessageSentResponse> {
+  return apiPost<MessageSentResponse>('/api/messages', { recipientId: request.recipientId, content: request.content }, options)
 }
 
 export function getConversations(options?: ApiRequestOptions): Promise<import('./types.ts').MessageConversation[]> {
@@ -23,4 +23,8 @@ export function getProfessionalInbox(options?: ApiRequestOptions): Promise<impor
 
 export function getInboxMessages(patientId: number, options?: ApiRequestOptions): Promise<import('./types.ts').MessageHistory[]> {
   return apiGet(`/api/messages/inbox/${encodeURIComponent(patientId)}`, options)
+}
+
+export function sendReply(patientId: number, content: string, options?: ApiRequestOptions): Promise<MessageSentResponse> {
+  return apiPost(`/api/messages/inbox/${encodeURIComponent(patientId)}/reply`, { content }, options)
 }

@@ -5,6 +5,7 @@ import Alert from '../../components/ui/Alert.tsx'
 import Card from '../../components/ui/Card.tsx'
 import LoadingState from '../../components/ui/LoadingState.tsx'
 import PageHeader from '../../components/ui/PageHeader.tsx'
+import ReplyForm from './ReplyForm.tsx'
 import { MessageHistoryView } from './MessageHistoryView.tsx'
 import { useAuth } from '../auth/AuthContext.ts'
 import { getConversations, getConversationMessages } from './messageService.ts'
@@ -28,7 +29,7 @@ export function ConversationList({ conversations, selected }: { conversations: M
 }
 
 
-function ConversationThread({ conversation, patientId }: { conversation: MessageConversation; patientId: number }) {
+function ConversationThread({ conversation, patientId, refreshConversations }: { conversation: MessageConversation; patientId: number; refreshConversations: (signal: AbortSignal) => Promise<void> }) {
   const [state, setState] = useState<LoadState<MessageHistory[]>>({ status: 'loading' })
   useEffect(() => {
     const controller = new AbortController()
@@ -39,10 +40,21 @@ function ConversationThread({ conversation, patientId }: { conversation: Message
       })
     return () => controller.abort()
   }, [conversation.recipientId])
+  async function refresh(signal: AbortSignal) {
+    await Promise.all([
+      getConversationMessages(conversation.recipientId, { signal }).then((data) => {
+        if (!signal.aborted) setState({ status: 'loaded', data })
+      }),
+      refreshConversations(signal),
+    ])
+  }
   return <Card title={`${conversation.displayName} · ${conversation.role === 'DOCTOR' ? 'Doctor' : 'Staff'}`} titleId="thread-title">
     {state.status === 'loading' && <LoadingState label="Loading conversation…" />}
     {state.status === 'error' && <Alert tone="error" role="alert">{state.error}</Alert>}
-    {state.status === 'loaded' && <MessageHistoryView messages={state.data} currentUserId={patientId} otherName={conversation.displayName} />}
+    {state.status === 'loaded' && <>
+      <MessageHistoryView messages={state.data} currentUserId={patientId} otherName={conversation.displayName} />
+      <ReplyForm targetId={conversation.recipientId} mode="patient" refresh={refresh} />
+    </>}
   </Card>
 }
 
@@ -60,6 +72,10 @@ function PatientMessages() {
       })
     return () => controller.abort()
   }, [])
+  async function refreshConversations(signal: AbortSignal) {
+    const data = await getConversations({ signal })
+    if (!signal.aborted) setState({ status: 'loaded', data })
+  }
   const conversation = state.status === 'loaded' ? state.data.find((item) => item.recipientId === selected) : undefined
   return <section className="page" aria-labelledby="messages-title">
     <PageHeader titleId="messages-title" title="Your conversations" eyebrow="Messages" icon={MessagesSquare}
@@ -70,7 +86,7 @@ function PatientMessages() {
     {state.status === 'loaded' && <div className="conversation-layout">
       <Card title="Conversations" titleId="conversation-list-title"><ConversationList conversations={state.data} selected={selected} /></Card>
       {recipientId ? conversation && user ?
-        <ConversationThread key={`${user.id}:${conversation.recipientId}`} conversation={conversation} patientId={user.id} /> :
+        <ConversationThread key={`${user.id}:${conversation.recipientId}`} conversation={conversation} patientId={user.id} refreshConversations={refreshConversations} /> :
         <Alert tone="error" role="alert">This conversation is not available.</Alert> :
         state.data.length > 0 && <Alert tone="info" role="status">Choose a conversation to view its messages.</Alert>}
     </div>}

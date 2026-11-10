@@ -3,6 +3,10 @@ import type { MessageRecipient, MessageSentResponse, SendMessageRequest } from '
 
 export function validateMessage(recipient: string, content: string, recipients: MessageRecipient[]): string | null {
   if (!recipients.some((item) => String(item.id) === recipient)) return 'Choose a recipient.'
+  return validateMessageContent(content)
+}
+
+export function validateMessageContent(content: string): string | null {
   if (!content.trim()) return 'Enter a message.'
   if ([...content].length > 5000) return 'Your message must be at most 5,000 characters.'
   return null

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
+import ReplyForm from './ReplyForm.tsx'
 import { Inbox } from 'lucide-react'
 import Alert from '../../components/ui/Alert.tsx'
 import Card from '../../components/ui/Card.tsx'
@@ -25,16 +26,27 @@ export function InboxList({ items, basePath, selected }: { items: MessageInboxCo
   </li>)}</ul>
 }
 
-function InboxThread({ conversation, professionalId }: { conversation: MessageInboxConversation; professionalId: number }) {
+function InboxThread({ conversation, professionalId, refreshInbox }: { conversation: MessageInboxConversation; professionalId: number; refreshInbox: (signal: AbortSignal) => Promise<void> }) {
   const [state, setState] = useState<State<MessageHistory[]>>({ status: 'loading' })
   useEffect(() => loadInboxRequest((signal) => getInboxMessages(conversation.patientId, { signal }),
     (data) => setState({ status: 'loaded', data }),
     (error) => setState({ status: 'error', error: conversationError(error) })), [conversation.patientId])
+  async function refresh(signal: AbortSignal) {
+    await Promise.all([
+      getInboxMessages(conversation.patientId, { signal }).then((data) => {
+        if (!signal.aborted) setState({ status: 'loaded', data })
+      }),
+      refreshInbox(signal),
+    ])
+  }
   return <Card title={conversation.displayName} titleId="inbox-thread-title">
     {state.status === 'loading' && <LoadingState label="Loading patient conversation…" />}
     {state.status === 'error' && <Alert tone="error" role="alert">{state.error}</Alert>}
-    {state.status === 'loaded' && <MessageHistoryView messages={state.data} currentUserId={professionalId}
-      otherName={conversation.displayName} incomingLabel="Patient message" />}
+    {state.status === 'loaded' && <>
+      <MessageHistoryView messages={state.data} currentUserId={professionalId}
+        otherName={conversation.displayName} incomingLabel="Patient message" />
+      {state.data.length > 0 && <ReplyForm targetId={conversation.patientId} refresh={refresh} />}
+    </>}
   </Card>
 }
 
@@ -47,6 +59,10 @@ function ClinicianInbox() {
   useEffect(() => loadInboxRequest((signal) => getProfessionalInbox({ signal }),
     (data) => setState({ status: 'loaded', data }),
     (error) => setState({ status: 'error', error: conversationError(error) })), [])
+  async function refreshInbox(signal: AbortSignal) {
+    const data = await getProfessionalInbox({ signal })
+    if (!signal.aborted) setState({ status: 'loaded', data })
+  }
   const conversation = state.status === 'loaded' ? state.data.find((item) => item.patientId === selected) : undefined
   return <section className="page" aria-labelledby="inbox-title">
     <PageHeader titleId="inbox-title" title="Patient inbox" eyebrow="Messages" icon={Inbox}
@@ -56,7 +72,7 @@ function ClinicianInbox() {
     {state.status === 'loaded' && <div className="conversation-layout">
       <Card title="Patient conversations" titleId="inbox-list-title"><InboxList items={state.data} basePath={basePath} selected={selected} /></Card>
       {patientId ? conversation && user ?
-        <InboxThread key={`${user.id}:${conversation.patientId}`} conversation={conversation} professionalId={user.id} /> :
+        <InboxThread key={`${user.id}:${conversation.patientId}`} conversation={conversation} professionalId={user.id} refreshInbox={refreshInbox} /> :
         <Alert tone="error" role="alert">This conversation is not available.</Alert> :
         state.data.length > 0 && <Alert tone="info" role="status">Choose a patient conversation to view its messages.</Alert>}
     </div>}
