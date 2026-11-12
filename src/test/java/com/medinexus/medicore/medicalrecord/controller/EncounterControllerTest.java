@@ -86,7 +86,7 @@ class EncounterControllerTest {
     @EnumSource(value = Role.class, names = {"DOCTOR", "STAFF"})
     void doctorsAndStaffCreateAndListVisits(Role role) throws Exception {
         when(service.create(user(role), "syn-patient-1", REQUEST)).thenReturn(VISIT);
-        when(service.listForPatient(user(role), "syn-patient-1")).thenReturn(List.of(VISIT));
+        when(service.listForPatient(user(role), "syn-patient-1")).thenReturn(new com.medinexus.medicore.medicalrecord.dto.EncounterListResult(List.of(VISIT), true, 0));
 
         mvc.perform(post("/api/patients/syn-patient-1/encounters").with(csrf()).with(as(role))
                         .contentType(MediaType.APPLICATION_JSON).content(BODY))
@@ -98,15 +98,28 @@ class EncounterControllerTest {
                         """, JsonCompareMode.STRICT));
         mvc.perform(get("/api/patients/syn-patient-1/encounters").with(as(role)))
                 .andExpect(status().isOk())
-                .andExpect(content().json("[{\"id\":\"enc-1\",\"type\":\"Consultation\"}]"));
+                .andExpect(content().json("{\"encounters\":[{\"id\":\"enc-1\",\"type\":\"Consultation\"}],\"complete\":true,\"excludedCount\":0}"));
         verify(service).create(user(role), "syn-patient-1", REQUEST);
     }
 
     @Test
-    void patientsReadOnlyTheirOwnVisitsAndCannotCreate() throws Exception {
-        when(service.listOwn(user(Role.PATIENT))).thenReturn(List.of(VISIT));
+    void bothGetEndpointsExposeIncompleteMetadataEvenWithNoAcceptedEncounters() throws Exception {
+        var partial = new com.medinexus.medicore.medicalrecord.dto.EncounterListResult(List.of(), false, 2);
+        when(service.listForPatient(user(Role.DOCTOR), "syn-patient-1")).thenReturn(partial);
+        when(service.listOwn(user(Role.PATIENT))).thenReturn(partial);
+        mvc.perform(get("/api/patients/syn-patient-1/encounters").with(as(Role.DOCTOR)))
+                .andExpect(status().isOk()).andExpect(content().json(
+                        "{\"encounters\":[],\"complete\":false,\"excludedCount\":2}", JsonCompareMode.STRICT));
         mvc.perform(get("/api/patients/me/encounters").with(as(Role.PATIENT)))
-                .andExpect(status().isOk()).andExpect(content().json("[{\"id\":\"enc-1\"}]"));
+                .andExpect(status().isOk()).andExpect(content().json(
+                        "{\"encounters\":[],\"complete\":false,\"excludedCount\":2}", JsonCompareMode.STRICT));
+    }
+
+    @Test
+    void patientsReadOnlyTheirOwnVisitsAndCannotCreate() throws Exception {
+        when(service.listOwn(user(Role.PATIENT))).thenReturn(new com.medinexus.medicore.medicalrecord.dto.EncounterListResult(List.of(VISIT), true, 0));
+        mvc.perform(get("/api/patients/me/encounters").with(as(Role.PATIENT)))
+                .andExpect(status().isOk()).andExpect(content().json("{\"encounters\":[{\"id\":\"enc-1\"}],\"complete\":true,\"excludedCount\":0}"));
         // Query parameters cannot select another record.
         mvc.perform(get("/api/patients/me/encounters").param("patientId", "syn-other").with(as(Role.PATIENT)))
                 .andExpect(status().isOk());

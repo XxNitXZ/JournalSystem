@@ -1,14 +1,14 @@
 import { apiGet, apiPost, type ApiRequestOptions } from '../../services/apiClient.ts'
-import type { EncounterSummary, NewEncounterRequest, PractitionerOption } from './types.ts'
+import type { EncounterListResult, EncounterSummary, NewEncounterRequest, PractitionerOption } from './types.ts'
 
 /** The visits of one registered patient, newest first (DOCTOR and STAFF). */
-export function listPatientEncounters(patientId: string, options?: ApiRequestOptions): Promise<EncounterSummary[]> {
-  return apiGet<EncounterSummary[]>(`/api/patients/${encodeURIComponent(patientId)}/encounters`, options)
+export function listPatientEncounters(patientId: string, options?: ApiRequestOptions): Promise<EncounterListResult> {
+  return apiGet<EncounterListResult>(`/api/patients/${encodeURIComponent(patientId)}/encounters`, options)
 }
 
 /** The signed-in patient's own visits, newest first (PATIENT). The record is chosen by MediCore, never by an ID. */
-export function listOwnEncounters(options?: ApiRequestOptions): Promise<EncounterSummary[]> {
-  return apiGet<EncounterSummary[]>('/api/patients/me/encounters', options)
+export function listOwnEncounters(options?: ApiRequestOptions): Promise<EncounterListResult> {
+  return apiGet<EncounterListResult>('/api/patients/me/encounters', options)
 }
 
 /** Documents a visit for the patient in the URL (DOCTOR and STAFF). Never retried automatically. */

@@ -15,7 +15,7 @@ export function renderSection(state: EncounterListState, createFor?: string, cre
   practitioners?: PractitionerOption[]) {
   return renderToStaticMarkup(
     <MemoryRouter>
-      <EncountersSection load={async () => []} createFor={createFor} initialState={state} initiallyCreating={creating}
+      <EncountersSection load={async () => ({ encounters: [], complete: true, excludedCount: 0 })} createFor={createFor} initialState={state} initiallyCreating={creating}
         initialPractitioners={practitioners} />
     </MemoryRouter>,
   )

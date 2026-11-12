@@ -134,6 +134,26 @@ class EncounterMapperTest {
     }
 
     @Test
+    void missingClassCandidateUsesAllTheSameProjectionValidations() {
+        Encounter candidate = parse("");
+        candidate.setClass_(null);
+        mapper.validateMissingClassCandidate(candidate);
+        assertThat(candidate.hasClass_()).isFalse();
+        assertThatThrownBy(() -> mapper.toDto(candidate)).isInstanceOf(IllegalArgumentException.class);
+        for (String extra : new String[] {",\"diagnosis\":[{\"rank\":1}]", ",\"location\":[{\"status\":\"active\"}]"}) {
+            Encounter invalid = parse(extra);
+            assertThatThrownBy(() -> mapper.toDto(invalid)).isInstanceOf(IllegalArgumentException.class);
+            invalid.setClass_(null);
+            assertThatThrownBy(() -> mapper.validateMissingClassCandidate(invalid)).isInstanceOf(IllegalArgumentException.class);
+        }
+        candidate.setStatus(null);
+        assertThatThrownBy(() -> mapper.validateMissingClassCandidate(candidate)).isInstanceOf(IllegalArgumentException.class);
+        candidate.setStatus(Encounter.EncounterStatus.NULL);
+        assertThatThrownBy(() -> mapper.validateMissingClassCandidate(candidate)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> mapper.validateMissingClassCandidate(parse(""))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void rejectsMissingRequiredFieldsAndNullResource() {
         Encounter withoutStatus = parse("");
         withoutStatus.setStatus(null);

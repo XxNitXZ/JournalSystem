@@ -13,10 +13,10 @@ import {
 } from './clinicalNoteForm.ts'
 import { encounterErrorMessage } from './encounterForm.ts'
 import { listPatientEncounters } from './encounterService.ts'
-import type { ClinicalNote, EncounterSummary } from './types.ts'
+import type { ClinicalNote, EncounterListResult, EncounterSummary } from './types.ts'
 
 export type NoteEncounterState = { status: 'loading' } | { status: 'failed'; message: string }
-  | { status: 'loaded'; encounters: EncounterSummary[] }
+  | ({ status: 'loaded' } & EncounterListResult)
 
 interface CreateClinicalNoteFormViewProps {
   encounterState: NoteEncounterState
@@ -73,8 +73,12 @@ export function CreateClinicalNoteFormView({ encounterState, encounterId, conten
         </div>
       </fieldset>
       {encounterState.status === 'loading' && <LoadingState label="Loading encounters…" />}
+      {encounterState.status === 'loaded' && !encounterState.complete && <Alert tone="info" role="alert">
+        The encounter list is incomplete. {encounterState.excludedCount} encounters were excluded because source records are invalid.
+        {encounterState.encounters.length === 0 && ' No valid encounters are available.'}
+      </Alert>}
       {encounterState.status === 'failed' && <Alert tone="error" role="alert">{encounterState.message}</Alert>}
-      {noEncounters && (
+      {noEncounters && encounterState.status === 'loaded' && encounterState.complete && (
         <Alert tone="info">
           This patient has no encounters yet. A note always belongs to an encounter: use Create Encounter first, then
           add the note.
@@ -96,7 +100,7 @@ interface CreateClinicalNoteFormProps {
 /** Writes a clinical note on one of the open patient's encounters (DOCTOR and STAFF). */
 function CreateClinicalNoteForm({ patientId, onCreated, onCancel, initialEncounters }: CreateClinicalNoteFormProps) {
   const [encounterState, setEncounterState] = useState<NoteEncounterState>(
-    initialEncounters ? { status: 'loaded', encounters: initialEncounters } : { status: 'loading' })
+    initialEncounters ? { status: 'loaded', encounters: initialEncounters, complete: true, excludedCount: 0 } : { status: 'loading' })
   const [encounterId, setEncounterId] = useState('')
   const [content, setContent] = useState('')
   const [pending, setPending] = useState(false)
@@ -107,8 +111,8 @@ function CreateClinicalNoteForm({ patientId, onCreated, onCancel, initialEncount
     if (initialEncounters) return undefined
     const controller = new AbortController()
     listPatientEncounters(patientId, { signal: controller.signal })
-      .then((encounters) => {
-        if (!controller.signal.aborted) setEncounterState({ status: 'loaded', encounters })
+      .then((result) => {
+        if (!controller.signal.aborted) setEncounterState({ status: 'loaded', ...result })
       })
       .catch((failure: unknown) => {
         if (!controller.signal.aborted) {

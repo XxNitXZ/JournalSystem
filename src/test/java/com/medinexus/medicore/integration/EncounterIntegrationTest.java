@@ -194,7 +194,39 @@ class EncounterIntegrationTest {
     private JsonNode list(HttpClient client, String patient) throws Exception {
         HttpResponse<String> response = get(client, "/api/patients/" + patient + "/encounters");
         assertThat(response.statusCode()).isEqualTo(200);
-        return json.readTree(response.body());
+        return json.readTree(response.body()).get("encounters");
+    }
+
+    @Test
+    void missingClassResultsRemainExplicitAndIsolatedForBothPatients() throws Exception {
+        String first = account(Role.PATIENT, patientPnr);
+        String second = account(Role.PATIENT, TestPersonnummer.next());
+        identities.assign(id(first), patientId);
+        identities.assign(id(second), otherPatientId);
+        Encounter invalid = new Encounter();
+        invalid.setId("missing-class-" + suffix);
+        invalid.setStatus(Encounter.EncounterStatus.FINISHED);
+        invalid.setSubject(new Reference("Patient/" + patientId));
+        fhir.seed(invalid);
+        try (HttpClient clinician = signedIn(linkedDoctor()); HttpClient patient = signedIn(first);
+                HttpClient otherPatient = signedIn(second)) {
+            for (String path : List.of("/api/patients/" + patientId + "/encounters")) {
+                HttpResponse<String> response = get(clinician, path);
+                assertThat(response.statusCode()).isEqualTo(200);
+                JsonNode body = json.readTree(response.body());
+                assertThat(body.get("encounters")).isEmpty();
+                assertThat(body.get("complete").asBoolean()).isFalse();
+                assertThat(body.get("excludedCount").asInt()).isEqualTo(1);
+            }
+            JsonNode own = json.readTree(get(patient, "/api/patients/me/encounters?patientId=" + otherPatientId).body());
+            assertThat(own.get("complete").asBoolean()).isFalse();
+            assertThat(own.get("excludedCount").asInt()).isEqualTo(1);
+            JsonNode other = json.readTree(get(otherPatient, "/api/patients/me/encounters?patientId=" + patientId).body());
+            assertThat(other.get("encounters")).isEmpty();
+            assertThat(other.get("complete").asBoolean()).isTrue();
+            assertThat(other.get("excludedCount").asInt()).isZero();
+            assertThat(get(otherPatient, "/api/patients/" + patientId + "/encounters").statusCode()).isEqualTo(403);
+        }
     }
 
     @Test
@@ -341,7 +373,7 @@ class EncounterIntegrationTest {
 
             HttpResponse<String> own = get(patient, "/api/patients/me/encounters?patientId=" + otherPatientId);
             assertThat(own.statusCode()).isEqualTo(200);
-            JsonNode visits = json.readTree(own.body());
+            JsonNode visits = json.readTree(own.body()).get("encounters");
             assertThat(visits).hasSize(1);
             assertThat(visits.get(0).get("start").asString()).isEqualTo("2026-11-08T11:00:00+01:00");
             assertThat(visits.get(0).get("practitioners").get(0).asString()).isEqualTo("Dr Ali Khan");

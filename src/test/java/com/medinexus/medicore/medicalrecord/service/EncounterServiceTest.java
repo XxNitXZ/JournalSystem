@@ -313,15 +313,15 @@ class EncounterServiceTest {
     @EnumSource(value = Role.class, names = {"DOCTOR", "STAFF"})
     void doctorsAndStaffListTheVisitsNewestFirstWithNames(Role role) {
         UserDto clinician = signedIn(7L, role);
-        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(List.of(
+        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(new com.medinexus.medicore.medicalrecord.dto.EncounterSearchResult(List.of(
                 found("e-old", "2025-03-01", PRACTITIONER_ID, "Follow-up encounter"),
                 found("e-none", null, null, null),
                 found("e-new", "2026-11-10T14:30:00+01:00", PRACTITIONER_ID, "Consultation"),
-                found("e-mid", "2026-11-10T09:00:00Z", "syn-unknown", null)));
+                found("e-mid", "2026-11-10T09:00:00Z", "syn-unknown", null)), true, 0));
         when(practitioners.readPractitioner("syn-unknown")).thenThrow(new FhirServerException("practitioner-read",
                 FhirServerException.Type.CLIENT_ERROR, 404, List.of(), null));
 
-        List<EncounterSummaryDto> visits = service.listForPatient(clinician, PATIENT_ID);
+        List<EncounterSummaryDto> visits = service.listForPatient(clinician, PATIENT_ID).encounters();
 
         assertThat(visits).extracting(EncounterSummaryDto::id).containsExactly("e-new", "e-mid", "e-old", "e-none");
         assertThat(visits.getFirst().practitioners()).containsExactly("Dr Ali Khan");
@@ -333,10 +333,24 @@ class EncounterServiceTest {
     }
 
     @Test
+    void preservesCompletenessWhenSummarizingOwnAndClinicianResults() {
+        UserDto doctor = signedIn(7L, Role.DOCTOR);
+        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(
+                new com.medinexus.medicore.medicalrecord.dto.EncounterSearchResult(List.of(), false, 3));
+        var result = service.listForPatient(doctor, PATIENT_ID);
+        assertThat(result.encounters()).isEmpty();
+        assertThat(result.complete()).isFalse();
+        assertThat(result.excludedCount()).isEqualTo(3);
+        when(users.findById(9L)).thenReturn(Optional.of(account(9L, Role.PATIENT, PATIENT_ID)));
+        var own = service.listOwn(new UserDto(9L, "synthetic@example.test", Role.PATIENT));
+        assertThat(own).isEqualTo(result);
+    }
+
+    @Test
     void anEmptyListIsFineAndUnknownPatientsAreNotSearched() {
         UserDto doctor = signedIn(7L, Role.DOCTOR);
-        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(List.of());
-        assertThat(service.listForPatient(doctor, PATIENT_ID)).isEmpty();
+        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(new com.medinexus.medicore.medicalrecord.dto.EncounterSearchResult(List.of(), true, 0));
+        assertThat(service.listForPatient(doctor, PATIENT_ID).encounters()).isEmpty();
 
         when(registry.isKnown("syn-foreign")).thenReturn(false);
         assertThatThrownBy(() -> service.listForPatient(doctor, "syn-foreign"))
@@ -361,8 +375,8 @@ class EncounterServiceTest {
         assertThatThrownBy(() -> service.listForPatient(patient, PATIENT_ID)).isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> service.listForPatient(patient, "syn-other")).isInstanceOf(AccessDeniedException.class);
 
-        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(List.of(found("e-1", "2026-11-10", PRACTITIONER_ID, null)));
-        assertThat(service.listOwn(patient)).extracting(EncounterSummaryDto::id).containsExactly("e-1");
+        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(new com.medinexus.medicore.medicalrecord.dto.EncounterSearchResult(List.of(found("e-1", "2026-11-10", PRACTITIONER_ID, null)), true, 0));
+        assertThat(service.listOwn(patient).encounters()).extracting(EncounterSummaryDto::id).containsExactly("e-1");
         verify(encounters).findByPatientId(PATIENT_ID);
         verify(encounters, never()).findByPatientId("syn-other");
     }

@@ -118,15 +118,15 @@ test('diagnoses: list, add form, validation, API and permissions', async (contex
     })
 
     await context.test('field errors are shown next to the field; saving disables the form', () => {
-      const html = render.renderDiagnosisForm({ status: 'loaded', encounters: visits }, { codeSystem: 'SNOMED_CT', code: '123' },
+      const html = render.renderDiagnosisForm({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits }, { codeSystem: 'SNOMED_CT', code: '123' },
         { field: 'code', message: 'This is not a valid SNOMED CT concept ID. Check the code or leave it empty.' })
       assert.match(html, /<input id="diagnosis-code"[^>]*aria-invalid="true"[^>]*aria-describedby="diagnosis-code-help diagnosis-code-error"/)
       assert.match(html, /<p id="diagnosis-code-error" class="field__error" role="alert">This is not a valid SNOMED CT/)
-      const saving = render.renderDiagnosisForm({ status: 'loaded', encounters: visits }, { diagnosis: 'x' }, null, true)
+      const saving = render.renderDiagnosisForm({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits }, { diagnosis: 'x' }, null, true)
       assert.match(saving, /Saving diagnosis…/)
       assert.match(saving, /aria-busy="true"/)
       assert.match(saving, /<fieldset disabled="">/)
-      const failed = render.renderDiagnosisForm({ status: 'loaded', encounters: visits }, { diagnosis: 'Astma' }, null,
+      const failed = render.renderDiagnosisForm({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits }, { diagnosis: 'Astma' }, null,
         false, 'The diagnosis could not be saved. Please try again later.')
       assert.match(failed, /role="alert".*The diagnosis could not be saved/)
       assert.match(failed, /value="Astma"/, 'the entered values are kept after a failure')
@@ -258,7 +258,7 @@ test('diagnoses: list, add form, validation, API and permissions', async (contex
         assert.match(renderRoute(as(role), '/patients/syn-patient-1'), /Loading patient profile/)
       }
       assert.match(renderRoute(as('PATIENT'), '/patients/syn-patient-1'), /available to doctor or staff accounts only/)
-      assert.match(encounterRender.renderSection({ status: 'loaded', encounters: visits }, 'syn-patient-1'),
+      assert.match(encounterRender.renderSection({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits }, 'syn-patient-1'),
         /Create Encounter<\/button>/)
       assert.match(noteRender.renderNoteSection({ status: 'loaded', notes: [] }, 'syn-patient-1'), /Add Clinical Note<\/button>/)
     })

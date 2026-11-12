@@ -329,9 +329,9 @@ class DiagnosisServiceTest {
                 new SubjectReference("Encounter/syn-enc-of-other", null, null, null),
                 new SubjectReference("Practitioner/syn-gone", null, null, null));
         when(conditions.findByPatientId(PATIENT_ID)).thenReturn(List.of(older, error, imported, newer));
-        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(List.of(new EncounterDto(ENCOUNTER_ID, "finished",
+        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(new com.medinexus.medicore.medicalrecord.dto.EncounterSearchResult(List.of(new EncounterDto(ENCOUNTER_ID, "finished",
                 null, List.of(new Concept("Consultation", List.of())), null, null, null, List.of(),
-                new PeriodValue("2026-01-01T07:30:00+01:00", null), null, List.of(), List.of(), List.of(), List.of(), null)));
+                new PeriodValue("2026-01-01T07:30:00+01:00", null), null, List.of(), List.of(), List.of(), List.of(), null)), false, 1));
         when(practitioners.readPractitioner("syn-gone")).thenThrow(missing("practitioner-read"));
 
         List<DiagnosisDto> listed = service.listForPatient(clinician, PATIENT_ID);

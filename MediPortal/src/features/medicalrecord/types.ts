@@ -182,3 +182,9 @@ export interface ObservationSearchResult {
   complete: boolean
   excludedCount: number
 }
+
+export interface EncounterListResult {
+  encounters: EncounterSummary[]
+  complete: boolean
+  excludedCount: number
+}

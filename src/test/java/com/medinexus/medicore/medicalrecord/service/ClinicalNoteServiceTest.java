@@ -331,9 +331,9 @@ class ClinicalNoteServiceTest {
         foreignVisit.getContentFirstRep().setAttachment(new Attachment().setContentType("application/pdf")
                 .setUrl("http://evil.example/x.pdf"));
         doReturn(List.of(older, error, foreignVisit, newer)).when(notes).findByPatientId(PATIENT_ID);
-        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(List.of(
+        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(new com.medinexus.medicore.medicalrecord.dto.EncounterSearchResult(List.of(
                 visit(ENCOUNTER_ID, "2026-11-01T07:30:00+01:00", "Consultation"),
-                visit("syn-enc-2", "2026-11-11", "Follow-up encounter")));
+                visit("syn-enc-2", "2026-11-11", "Follow-up encounter")), false, 1));
         when(practitioners.readPractitioner("syn-gone")).thenThrow(missing("practitioner-read"));
 
         List<ClinicalNoteDto> listed = service.listForPatient(clinician, PATIENT_ID);
@@ -391,7 +391,7 @@ class ClinicalNoteServiceTest {
         UserDto patient = signedIn(9L, Role.PATIENT, null, PATIENT_ID);
         doReturn(List.of(stored("n-1", "2026-11-01T08:00:00Z", ENCOUNTER_ID, PRACTITIONER_ID, "Hej"))).when(notes)
                 .findByPatientId(PATIENT_ID);
-        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(List.of());
+        when(encounters.findByPatientId(PATIENT_ID)).thenReturn(new com.medinexus.medicore.medicalrecord.dto.EncounterSearchResult(List.of(), true, 0));
 
         assertThat(service.listOwn(patient)).singleElement()
                 .satisfies(note -> assertThat(note.content()).isEqualTo("Hej"));

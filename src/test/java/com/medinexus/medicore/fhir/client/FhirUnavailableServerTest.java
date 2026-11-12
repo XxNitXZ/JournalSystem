@@ -119,7 +119,7 @@ class FhirUnavailableServerTest {
                         new CreateEncounterRequest(SECRET_PATIENT, CreateEncounterRequest.Status.FINISHED,
                                 CreateEncounterRequest.EncounterClass.AMB, null, null, null, null, null, null,
                                 List.of(new CreateEncounterRequest.Participant("secret-practitioner-77", null))))),
-                op("encounter-search", "GET", false, ctx -> ctx.getBean(FhirEncounterClient.class).findByPatientId(SECRET_PATIENT)),
+                op("encounter-search", "GET", false, ctx -> ctx.getBean(FhirEncounterClient.class).findByPatientId(SECRET_PATIENT).encounters()),
                 op("organization-read", "GET", false, ctx -> ctx.getBean(FhirOrganizationClient.class)
                         .readOrganization("secret-org-77")),
                 op("organization-create", "POST", true, ctx -> ctx.getBean(FhirOrganizationClient.class)
@@ -355,7 +355,7 @@ class FhirUnavailableServerTest {
             // A Patient without records is not an error.
             assertThat(ctx.getBean(FhirObservationClient.class).findByPatientId(SECRET_PATIENT).observations()).isEmpty();
             assertThat(ctx.getBean(FhirConditionClient.class).findByPatientId(SECRET_PATIENT)).isEmpty();
-            assertThat(ctx.getBean(FhirEncounterClient.class).findByPatientId(SECRET_PATIENT)).isEmpty();
+            assertThat(ctx.getBean(FhirEncounterClient.class).findByPatientId(SECRET_PATIENT).encounters()).isEmpty();
         });
         assertThat(localFhir.requests()).hasSize(5).allMatch(request -> request.startsWith("GET /fhir/"));
         assertSafe(output.getAll());

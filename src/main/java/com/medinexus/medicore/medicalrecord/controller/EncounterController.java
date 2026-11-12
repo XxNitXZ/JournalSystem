@@ -1,7 +1,6 @@
 package com.medinexus.medicore.medicalrecord.controller;
 
 import java.net.URI;
-import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.HttpStatus;
@@ -19,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.fhir.client.FhirServerException;
 import com.medinexus.medicore.medicalrecord.dto.EncounterSummaryDto;
+import com.medinexus.medicore.medicalrecord.dto.EncounterListResult;
 import com.medinexus.medicore.medicalrecord.dto.NewEncounterRequest;
 import com.medinexus.medicore.medicalrecord.service.EncounterRequestException;
 import com.medinexus.medicore.medicalrecord.service.EncounterService;
@@ -53,12 +53,12 @@ public class EncounterController {
     }
 
     @GetMapping("/api/patients/me/encounters")
-    public List<EncounterSummaryDto> own(@AuthenticationPrincipal UserDto principal) {
+    public EncounterListResult own(@AuthenticationPrincipal UserDto principal) {
         return encounters.listOwn(principal);
     }
 
     @GetMapping("/api/patients/{patientId}/encounters")
-    public List<EncounterSummaryDto> list(@AuthenticationPrincipal UserDto principal, @PathVariable String patientId) {
+    public EncounterListResult list(@AuthenticationPrincipal UserDto principal, @PathVariable String patientId) {
         return encounters.listForPatient(principal, patientId);
     }
 

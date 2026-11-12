@@ -150,12 +150,12 @@ class FhirEncounterRoundTripTest {
             client.createEncounter(new CreateEncounterRequest("other-patient", Status.PLANNED, EncounterClass.VR, null, null, null,
                     null, null, null, List.of(new Participant("other-practitioner", null))));
 
-            assertThat(client.findByPatientId("123")).containsExactly(dto);
-            assertThat(client.findByPatientId("other-patient")).singleElement().satisfies(other -> {
+            assertThat(client.findByPatientId("123").encounters()).containsExactly(dto);
+            assertThat(client.findByPatientId("other-patient").encounters()).singleElement().satisfies(other -> {
                 assertThat(other.id()).isEqualTo("local-2");
                 assertThat(other.participants().getFirst().individual().reference()).isEqualTo("Practitioner/other-practitioner");
             });
-            assertThat(client.findByPatientId("no-encounters")).isEmpty();
+            assertThat(client.findByPatientId("no-encounters").encounters()).isEmpty();
 
             assertThat(requests).hasSize(6);
             assertThat(requests.get(0)).isEqualTo("POST /fhir/Encounter");
@@ -215,7 +215,7 @@ class FhirEncounterRoundTripTest {
             assertThat(dto.locations()).extracting(location -> location.location().reference())
                     .containsExactly("Location/" + wardId, "Location/" + roomId);
             assertThat(dto.locations()).extracting(EncounterDto.LocationEntry::status).containsExactly("completed", "active");
-            assertThat(encounters.findByPatientId("synthetic-patient")).containsExactly(dto);
+            assertThat(encounters.findByPatientId("synthetic-patient").encounters()).containsExactly(dto);
 
             // Resolve the references with the Organization and Location clients (no coupling between clients).
             OrganizationDto clinic = ctx.getBean(OrganizationMapper.class).toDto(organizations.readOrganization(

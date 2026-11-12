@@ -44,6 +44,7 @@ import com.medinexus.medicore.fhir.client.FhirPractitionerClient;
 import com.medinexus.medicore.fhir.client.FhirServerException;
 import com.medinexus.medicore.medicalrecord.dto.CreateEncounterRequest;
 import com.medinexus.medicore.medicalrecord.dto.EncounterDto;
+import com.medinexus.medicore.medicalrecord.dto.EncounterListResult;
 import com.medinexus.medicore.medicalrecord.dto.EncounterSummaryDto;
 import com.medinexus.medicore.medicalrecord.dto.NewEncounterRequest;
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto.Coding;
@@ -169,7 +170,7 @@ public class EncounterService {
     // ---------- list ----------
 
     /** The visits of a Patient known to MediCore, newest first (DOCTOR and STAFF). */
-    public List<EncounterSummaryDto> listForPatient(UserDto principal, String patientId) {
+    public EncounterListResult listForPatient(UserDto principal, String patientId) {
         requireClinician(principal);
         requireLogicalId(patientId);
         patientAccess.checkPatientAccess(principal, patientId);
@@ -177,9 +178,10 @@ public class EncounterService {
             log.info("Encounters not listed, patient not found: accountId={}", principal.id());
             throw new PatientNotFoundException();
         }
-        List<EncounterSummaryDto> result = summarize(encounters.findByPatientId(patientId));
+        var search = encounters.findByPatientId(patientId);
+        List<EncounterSummaryDto> result = summarize(search.encounters());
         log.info("Encounters listed: accountId={}, count={}", principal.id(), result.size());
-        return result;
+        return new EncounterListResult(result, search.complete(), search.excludedCount());
     }
 
     /**
@@ -187,15 +189,16 @@ public class EncounterService {
      *
      * @throws EncounterRequestException RECORD_NOT_LINKED without an approved link
      */
-    public List<EncounterSummaryDto> listOwn(UserDto principal) {
+    public EncounterListResult listOwn(UserDto principal) {
         User account = account(principal);
         if (account.getRole() != Role.PATIENT) throw denied();
         String patientId = account.getFhirPatientId();
         if (patientId == null) throw new EncounterRequestException("RECORD_NOT_LINKED");
         patientAccess.checkPatientAccess(principal, patientId);
-        List<EncounterSummaryDto> result = summarize(encounters.findByPatientId(patientId));
+        var search = encounters.findByPatientId(patientId);
+        List<EncounterSummaryDto> result = summarize(search.encounters());
         log.info("Own encounters listed: accountId={}, count={}", principal.id(), result.size());
-        return result;
+        return new EncounterListResult(result, search.complete(), search.excludedCount());
     }
 
     // ---------- validation ----------

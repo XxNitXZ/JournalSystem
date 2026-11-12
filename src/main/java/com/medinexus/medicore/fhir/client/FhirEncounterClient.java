@@ -9,6 +9,9 @@ import java.util.Set;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.Encounter;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.medinexus.medicore.medicalrecord.dto.EncounterSearchResult;
 
 import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.parser.DataFormatException;
@@ -20,6 +23,7 @@ import com.medinexus.medicore.medicalrecord.dto.EncounterDto;
 @Component
 public class FhirEncounterClient {
 
+    private static final Logger log = LoggerFactory.getLogger(FhirEncounterClient.class);
     private static final int PAGE_SIZE = 100;
     private static final int MAX_PAGES = 10;
     private static final int MAX_RESULTS = 1_000;
@@ -59,25 +63,27 @@ public class FhirEncounterClient {
     }
 
     /**
-     * Searches subject=Patient/{patientId}, following at most 10 pages / 1,000 results.
-     * Returns no partial results. Subjects must be exact relative or same-base absolute
+     * Searches subject=Patient/{patientId}, following at most 10 pages / 1,000 examined entries.
+     * Reports missing-class exclusions explicitly. All other failures return no results. Subjects must be exact relative or same-base absolute
      * versionless Patient references; identifier-only and versioned references fail closed.
      * Server next links must remain within the configured FHIR base.
      */
-    public List<EncounterDto> findByPatientId(String patientId) {
+    public EncounterSearchResult findByPatientId(String patientId) {
         if (patientId == null || !patientId.matches("[A-Za-z0-9.-]{1,64}")) {
             throw new IllegalArgumentException("A valid logical FHIR Patient ID is required");
         }
         return requestExecutor.execute("encounter-search", () -> search(patientId));
     }
 
-    private List<EncounterDto> search(String patientId) {
+    private EncounterSearchResult search(String patientId) {
         String reference = "Patient/" + patientId;
         String base = fhirClient.getServerBase();
         URI current = URI.create(base + "/Encounter");
         Set<URI> visited = new HashSet<>();
         visited.add(current);
         List<EncounterDto> results = new ArrayList<>();
+        int examined = 0;
+        int excluded = 0;
         Bundle bundle = fhirClient.search().forResource(Encounter.class)
                 .where(Encounter.SUBJECT.hasId(reference)).count(PAGE_SIZE)
                 .returnBundle(Bundle.class).execute();
@@ -93,15 +99,23 @@ public class FhirEncounterClient {
                 if (!reference.equals(subject) && !(base + "/" + reference).equals(subject)) throw invalid();
                 if (encounter.getSubject().hasType() && !"Patient".equals(encounter.getSubject().getType())
                         && !"http://hl7.org/fhir/StructureDefinition/Patient".equals(encounter.getSubject().getType())) throw invalid();
-                if (results.size() == MAX_RESULTS) throw invalid();
+                if (++examined > MAX_RESULTS) throw invalid();
                 try {
-                    results.add(mapper.toDto(encounter));
+                    if (!encounter.hasClass_()) {
+                        mapper.validateMissingClassCandidate(encounter);
+                        excluded++;
+                    } else {
+                        results.add(mapper.toDto(encounter));
+                    }
                 } catch (IllegalArgumentException exception) {
                     throw invalid();
                 }
             }
             var links = bundle.getLink().stream().filter(link -> "next".equals(link.getRelation())).toList();
-            if (links.isEmpty()) return List.copyOf(results);
+            if (links.isEmpty()) {
+                if (excluded > 0) log.warn("FHIR search incomplete: operation=encounter-search reason=MISSING_CLASS excludedCount={}", excluded);
+                return new EncounterSearchResult(results, excluded == 0, excluded);
+            }
             if (page == MAX_PAGES || links.size() != 1 || !links.getFirst().hasUrl()) throw invalid();
             URI next = nextUri(current, links.getFirst().getUrl(), URI.create(base));
             if (!visited.add(next)) throw invalid();

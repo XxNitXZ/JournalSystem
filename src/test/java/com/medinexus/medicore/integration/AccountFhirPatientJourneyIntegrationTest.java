@@ -212,7 +212,7 @@ class AccountFhirPatientJourneyIntegrationTest {
         assertThat(patient.id()).isEqualTo(patientId);
         assertThat(patient.identifiers()).singleElement().satisfies(identifier ->
                 assertThat(identifier.value()).isEqualTo("SYN-" + patientId));
-        assertThat(encounters.findByPatientId(accountPatientId)).singleElement().satisfies(encounter -> {
+        assertThat(encounters.findByPatientId(accountPatientId).encounters()).singleElement().satisfies(encounter -> {
             assertThat(encounter.id()).isEqualTo(encounterId);
             assertThat(encounter.subject().reference()).isEqualTo("Patient/" + patientId);
             assertThat(encounter.participants().getFirst().individual().reference()).isEqualTo("Practitioner/" + practitionerId);

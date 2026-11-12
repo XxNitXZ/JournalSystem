@@ -26,8 +26,28 @@ test('encounters: list, create form, validation, API and permissions', async (co
     const { renderRoute } = await server.ssrLoadModule('/tests/auth-navigation-render.tsx')
     const { canEditPatients } = await server.ssrLoadModule('/src/features/patientmanagement/patientUpdate.ts')
 
+    await context.test('incomplete encounters warn in the section and both selectors, including all excluded', async () => {
+      const notes = await server.ssrLoadModule('/tests/clinical-note-render.tsx')
+      const diagnoses = await server.ssrLoadModule('/tests/diagnosis-render.tsx')
+      for (const encounters of [visits, []]) {
+        const state = { status: 'loaded', encounters, complete: false, excludedCount: 2 }
+        for (const html of [render.renderList(state), notes.renderNoteForm(state), diagnoses.renderDiagnosisForm(state)]) {
+          assert.match(html, /incomplete/)
+          assert.match(html, /2 encounters were excluded/)
+          assert.match(html, /role="alert"/)
+        }
+        if (!encounters.length) {
+          assert.match(render.renderList(state), /No valid encounters/)
+          assert.doesNotMatch(notes.renderNoteForm(state), /This patient has no encounters yet/)
+        }
+      }
+      assert.doesNotMatch(render.renderList({ status: 'loaded', encounters: [], complete: true, excludedCount: 0 }), /incomplete/)
+      globalThis.fetch = async () => new Response(JSON.stringify({ encounters: [], complete: false, excludedCount: 2 }))
+      assert.deepEqual(await service.listOwnEncounters(), { encounters: [], complete: false, excludedCount: 2 })
+    })
+
     await context.test('the list shows date, practitioner, type, status and place, never identifiers', () => {
-      const html = render.renderList({ status: 'loaded', encounters: visits })
+      const html = render.renderList({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits })
       const rows = html.match(/<tr>.*?<\/tr>/g) ?? []
       assert.equal(rows.length, 3, 'header and two visits')
       // Newest first, as delivered by MediCore; the time in local time.
@@ -44,8 +64,8 @@ test('encounters: list, create form, validation, API and permissions', async (co
 
     await context.test('loading, empty and error states', () => {
       assert.match(render.renderList({ status: 'loading' }), /Loading encounters…/)
-      assert.match(render.renderList({ status: 'loaded', encounters: [] }), /No encounters have been recorded yet\./)
-      assert.match(render.renderList({ status: 'loaded', encounters: [] }, 'No visits have been recorded yet.'),
+      assert.match(render.renderList({ status: 'loaded', complete: true, excludedCount: 0, encounters: [] }), /No encounters have been recorded yet\./)
+      assert.match(render.renderList({ status: 'loaded', complete: true, excludedCount: 0, encounters: [] }, 'No visits have been recorded yet.'),
         /No visits have been recorded yet\./)
       assert.match(render.renderList({ status: 'failed', message: 'The encounters could not be loaded.' }),
         /role="alert"[^>]*>.*could not be loaded/)
@@ -55,17 +75,17 @@ test('encounters: list, create form, validation, API and permissions', async (co
       assert.equal(canEditPatients('DOCTOR'), true)
       assert.equal(canEditPatients('STAFF'), true)
       assert.equal(canEditPatients('PATIENT'), false)
-      const clinician = render.renderSection({ status: 'loaded', encounters: visits }, 'syn-patient-1')
+      const clinician = render.renderSection({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits }, 'syn-patient-1')
       assert.match(clinician, /<h2 id="encounters-title">Encounters<\/h2>/)
       assert.match(clinician, /<button[^>]*>.*Create Encounter<\/button>/)
       // The patient's own view: the same list, no create action.
-      const patient = render.renderSection({ status: 'loaded', encounters: visits })
+      const patient = render.renderSection({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits })
       assert.doesNotMatch(patient, /Create Encounter/)
       assert.match(patient, /Dr Ali Khan/)
     })
 
     await context.test('the form uses the open patient, practitioners by name and the own one preselected', () => {
-      const html = render.renderSection({ status: 'loaded', encounters: [] }, 'syn-patient-1', true, practitioners)
+      const html = render.renderSection({ status: 'loaded', complete: true, excludedCount: 0, encounters: [] }, 'syn-patient-1', true, practitioners)
       assert.match(html, /<h3 id="create-encounter-title">Create Encounter<\/h3>/)
       assert.match(html, /<option value="p-own" selected="">Dr Ali Khan \(you\)<\/option>/)
       assert.match(html, /<option value="p-other">Dr Sara Ahmed<\/option>/)
@@ -168,10 +188,10 @@ test('encounters: list, create form, validation, API and permissions', async (co
           return new Response(JSON.stringify({ token: 'csrf-token', headerName: 'X-XSRF-TOKEN' }))
         }
         if (String(url).endsWith('/api/practitioners')) return new Response(JSON.stringify(practitioners))
-        return new Response(JSON.stringify(options?.method === 'POST' ? visits[0] : visits))
+        return new Response(JSON.stringify(options?.method === 'POST' ? visits[0] : { encounters: visits, complete: true, excludedCount: 0 }))
       }
-      assert.deepEqual(await service.listPatientEncounters('syn/p 1'), visits)
-      assert.deepEqual(await service.listOwnEncounters(), visits)
+      assert.deepEqual(await service.listPatientEncounters('syn/p 1'), { encounters: visits, complete: true, excludedCount: 0 })
+      assert.deepEqual(await service.listOwnEncounters(), { encounters: visits, complete: true, excludedCount: 0 })
       assert.deepEqual(await service.listPractitioners(), practitioners)
       const request = { startTime: '2026-11-10T14:30:00+01:00', practitionerId: 'p-own', type: 'CONSULTATION',
         status: 'FINISHED' }

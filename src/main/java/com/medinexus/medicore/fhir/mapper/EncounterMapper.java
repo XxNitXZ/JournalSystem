@@ -41,8 +41,21 @@ public class EncounterMapper {
                 || encounter.getStatus() == Encounter.EncounterStatus.NULL || !encounter.hasClass_()) {
             throw new IllegalArgumentException("Encounter status and class are required");
         }
+        return project(encounter);
+    }
+
+    /** Validates every projected field without inventing the missing required class. */
+    public void validateMissingClassCandidate(Encounter encounter) {
+        if (encounter == null || encounter.hasClass_() || !encounter.hasStatus()
+                || encounter.getStatus() == null || encounter.getStatus() == Encounter.EncounterStatus.NULL) {
+            throw new IllegalArgumentException("Encounter is not a missing-class-only candidate");
+        }
+        project(encounter);
+    }
+
+    private EncounterDto project(Encounter encounter) {
         return new EncounterDto(encounter.getIdElement().getIdPart(), encounter.getStatus().toCode(),
-                coding(encounter.getClass_()),
+                encounter.hasClass_() ? coding(encounter.getClass_()) : null,
                 encounter.getType().stream().map(this::concept).toList(),
                 encounter.hasServiceType() ? concept(encounter.getServiceType()) : null,
                 encounter.hasPriority() ? concept(encounter.getPriority()) : null,

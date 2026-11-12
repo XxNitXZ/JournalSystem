@@ -7,10 +7,10 @@ import LoadingState from '../../components/ui/LoadingState.tsx'
 import type { ApiRequestOptions } from '../../services/apiClient.ts'
 import CreateEncounterForm from './CreateEncounterForm.tsx'
 import { encounterErrorMessage, formatPlace, formatVisitDate, formatVisitStatus } from './encounterForm.ts'
-import type { EncounterSummary, PractitionerOption } from './types.ts'
+import type { EncounterListResult, PractitionerOption } from './types.ts'
 
 export type EncounterListState = { status: 'loading' } | { status: 'failed'; message: string }
-  | { status: 'loaded'; encounters: EncounterSummary[] }
+  | ({ status: 'loaded' } & EncounterListResult)
 
 const statusTones: Record<string, 'success' | 'warning' | 'neutral'> = {
   finished: 'success',
@@ -22,9 +22,10 @@ const statusTones: Record<string, 'success' | 'warning' | 'neutral'> = {
 export function EncounterListView({ state, emptyText }: { state: EncounterListState; emptyText: string }) {
   if (state.status === 'loading') return <LoadingState label="Loading encounters…" />
   if (state.status === 'failed') return <Alert tone="error" role="alert">{state.message}</Alert>
-  if (state.encounters.length === 0) return <p className="muted">{emptyText}</p>
+  const warning = !state.complete && <Alert tone="info" role="alert">This list is incomplete. {state.excludedCount} encounters were excluded because source records are invalid.</Alert>
+  if (state.encounters.length === 0) return <>{warning}<p className="muted">{state.complete ? emptyText : 'No valid encounters could be displayed.'}</p></>
   return (
-    <div className="table-scroll">
+    <>{warning}<div className="table-scroll">
       <table className="data-table">
         <caption className="visually-hidden">Encounters, most recent first</caption>
         <thead>
@@ -50,13 +51,13 @@ export function EncounterListView({ state, emptyText }: { state: EncounterListSt
           ))}
         </tbody>
       </table>
-    </div>
+    </div></>
   )
 }
 
 interface EncountersSectionProps {
   /** Loads the visits: a patient's (clinicians) or the signed-in patient's own. */
-  load: (options: ApiRequestOptions) => Promise<EncounterSummary[]>
+  load: (options: ApiRequestOptions) => Promise<EncounterListResult>
   /** The open patient for Create Encounter; only for doctors and staff. */
   createFor?: string
   emptyText?: string
@@ -81,7 +82,7 @@ function EncountersSection({ load, createFor, emptyText = 'No encounters have be
     if (initialState && reload === 0) return undefined
     const controller = new AbortController()
     load({ signal: controller.signal })
-      .then((encounters) => { if (!controller.signal.aborted) setState({ status: 'loaded', encounters }) })
+      .then((result) => { if (!controller.signal.aborted) setState({ status: 'loaded', ...result }) })
       .catch((failure: unknown) => {
         if (!controller.signal.aborted) setState({ status: 'failed', message: encounterErrorMessage(failure, 'load') })
       })

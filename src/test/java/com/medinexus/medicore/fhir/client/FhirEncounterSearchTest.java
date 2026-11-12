@@ -86,7 +86,7 @@ class FhirEncounterSearchTest {
     void mapsSingleResultAndSendsOnlyGetWithTypedSubjectAndCount() {
         response = query -> bundle(encounter("e1", "Patient/p1"), "");
         context().run(ctx -> {
-            var results = ctx.getBean(FhirEncounterClient.class).findByPatientId("p1");
+            var results = ctx.getBean(FhirEncounterClient.class).findByPatientId("p1").encounters();
             assertThat(results).hasSize(1);
             assertThat(results.getFirst().id()).isEqualTo("e1");
             assertThat(results.getFirst().status()).isEqualTo("finished");
@@ -111,7 +111,7 @@ class FhirEncounterSearchTest {
         response = query -> bundle(encounter("e1", "Patient/p1", participants) + ","
                 + encounter("e2", base + "/Patient/p1") + "," + encounter("e3", "Patient/p1"), "");
         context().run(ctx -> {
-            List<EncounterDto> results = ctx.getBean(FhirEncounterClient.class).findByPatientId("p1");
+            List<EncounterDto> results = ctx.getBean(FhirEncounterClient.class).findByPatientId("p1").encounters();
             assertThat(results).extracting(EncounterDto::id).containsExactly("e1", "e2", "e3");
             EncounterDto first = results.getFirst();
             assertThat(first.participants()).extracting(participant -> participant.individual().reference())
@@ -128,7 +128,7 @@ class FhirEncounterSearchTest {
 
     @Test
     void returnsEmptyListForEmptySearch() {
-        context().run(ctx -> assertThat(ctx.getBean(FhirEncounterClient.class).findByPatientId("p1")).isEmpty());
+        context().run(ctx -> assertThat(ctx.getBean(FhirEncounterClient.class).findByPatientId("p1").encounters()).isEmpty());
         assertThat(requests).hasSize(1);
     }
 
@@ -140,7 +140,7 @@ class FhirEncounterSearchTest {
         response = query -> query.equals("page=2") ? bundle(encounter("e2", "Patient/p1"), "")
                 : bundle(encounter("e1", "Patient/p1"), next);
         context().run(ctx -> {
-            assertThat(ctx.getBean(FhirEncounterClient.class).findByPatientId("p1"))
+            assertThat(ctx.getBean(FhirEncounterClient.class).findByPatientId("p1").encounters())
                     .extracting(EncounterDto::id).containsExactly("e1", "e2");
             assertThat(requests).hasSize(2);
             assertThat(requests.get(1)).isEqualTo("GET /fhir/Encounter?page=2");
@@ -153,7 +153,7 @@ class FhirEncounterSearchTest {
         context().run(ctx -> {
             for (String id : new String[] {null, "", " ", "Patient/p1", "http://example.test/p1", "p1&x=y", "p_1",
                     "../p1", "p1#x", "ä", "x".repeat(65)}) {
-                assertThatThrownBy(() -> ctx.getBean(FhirEncounterClient.class).findByPatientId(id))
+                assertThatThrownBy(() -> ctx.getBean(FhirEncounterClient.class).findByPatientId(id).encounters())
                         .isInstanceOf(IllegalArgumentException.class)
                         .hasMessage("A valid logical FHIR Patient ID is required");
             }
@@ -202,7 +202,7 @@ class FhirEncounterSearchTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"id", "badId", "subject", "status", "class", "includeMode"})
+    @ValueSource(strings = {"id", "badId", "subject", "status", "includeMode"})
     void rejectsMissingOrMalformedEncounterFields(String problem) {
         String entry = encounter("e1", "Patient/p1");
         entry = switch (problem) {
@@ -263,7 +263,7 @@ class FhirEncounterSearchTest {
     void preservesExternalErrorFromInitialSearchOrLaterPage(int requestNumber) {
         errorOnRequest = requestNumber;
         response = query -> bundle(encounter("e1", "Patient/p1"), base + "/Encounter?page=2");
-        context().run(ctx -> assertThatThrownBy(() -> ctx.getBean(FhirEncounterClient.class).findByPatientId("p1"))
+        context().run(ctx -> assertThatThrownBy(() -> ctx.getBean(FhirEncounterClient.class).findByPatientId("p1").encounters())
                 .isInstanceOfSatisfying(FhirServerException.class, failure -> {
                     assertThat(failure.operation()).isEqualTo("encounter-search");
                     assertThat(failure.type()).isEqualTo(FhirServerException.Type.UNAVAILABLE);
@@ -278,10 +278,10 @@ class FhirEncounterSearchTest {
     void failuresAreLoggedWithoutPatientIdsUrlsOrServerDetails(CapturedOutput output) {
         response = query -> query.contains("page=2") ? bundle(encounter("e2", "Patient/someone-else-88"), "")
                 : bundle(encounter("e1", "Patient/secret-patient-77"), "?page=2");
-        context().run(ctx -> assertThatThrownBy(() -> ctx.getBean(FhirEncounterClient.class).findByPatientId("secret-patient-77"))
+        context().run(ctx -> assertThatThrownBy(() -> ctx.getBean(FhirEncounterClient.class).findByPatientId("secret-patient-77").encounters())
                 .isInstanceOf(FhirServerException.class));
         errorOnRequest = requests.size() + 1;
-        context().run(ctx -> assertThatThrownBy(() -> ctx.getBean(FhirEncounterClient.class).findByPatientId("secret-patient-77"))
+        context().run(ctx -> assertThatThrownBy(() -> ctx.getBean(FhirEncounterClient.class).findByPatientId("secret-patient-77").encounters())
                 .isInstanceOf(FhirServerException.class));
 
         assertThat(output.getAll())
@@ -297,8 +297,94 @@ class FhirEncounterSearchTest {
         assertThat(output.getAll().split("FHIR request failed", -1)).hasSize(3);
     }
 
-    private void failsInvalid() {
+    @Test
+    void excludesMissingClassAcrossPagesAndContinues(CapturedOutput output) {
+        response = query -> query.contains("page=2")
+                ? bundle(missingClass("bad2", "Patient/p1") + "," + encounter("good2", "Patient/p1"), "")
+                : bundle(encounter("good1", "Patient/p1") + "," + missingClass("bad1", "Patient/p1"), "?page=2");
+        context().run(ctx -> {
+            var result = ctx.getBean(FhirEncounterClient.class).findByPatientId("p1");
+            assertThat(result.encounters()).extracting(EncounterDto::id).containsExactly("good1", "good2");
+            assertThat(result.complete()).isFalse();
+            assertThat(result.excludedCount()).isEqualTo(2);
+            assertThat(requests).hasSize(2).allMatch(request -> request.startsWith("GET "));
+            assertThat(output.getAll()).contains("reason=MISSING_CLASS", "excludedCount=2")
+                    .doesNotContain("bad1", "bad2", "Patient/p1");
+        });
+    }
+
+    @Test
+    void distinguishesAllExcludedFromEmptyAndCountsExcludedTowardLimit() {
+        response = query -> bundle(missingClass("bad", "Patient/p1"), "");
+        context().run(ctx -> {
+            var result = ctx.getBean(FhirEncounterClient.class).findByPatientId("p1");
+            assertThat(result.encounters()).isEmpty();
+            assertThat(result.complete()).isFalse();
+            assertThat(result.excludedCount()).isEqualTo(1);
+        });
+        response = query -> bundle("", "");
+        context().run(ctx -> {
+            var result = ctx.getBean(FhirEncounterClient.class).findByPatientId("p1");
+            assertThat(result.complete()).isTrue();
+            assertThat(result.excludedCount()).isZero();
+        });
+        String entries = java.util.stream.IntStream.range(0, 1000)
+                .mapToObj(i -> missingClass("bad-" + i, "Patient/p1")).collect(java.util.stream.Collectors.joining(","));
+        response = query -> bundle(entries, "");
+        context().run(ctx -> assertThat(ctx.getBean(FhirEncounterClient.class).findByPatientId("p1").excludedCount()).isEqualTo(1000));
+        response = query -> bundle(entries + "," + encounter("extra", "Patient/p1"), "");
+        failsInvalid();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"status", "subject", "diagnosis", "location", "id"})
+    void missingClassDoesNotHideOtherDefects(String defect) {
+        String entry = missingClass("bad", "Patient/p1");
+        entry = switch (defect) {
+            case "status" -> entry.replace("\"status\":\"finished\",", "");
+            case "subject" -> entry.replace("Patient/p1", "Patient/other");
+            case "id" -> entry.replace("\"id\":\"bad\",", "");
+            case "diagnosis" -> missingClass("bad", "Patient/p1", ",\"diagnosis\":[{\"rank\":1}]");
+            case "location" -> missingClass("bad", "Patient/p1", ",\"location\":[{\"status\":\"active\"}]");
+            default -> throw new AssertionError();
+        };
+        String invalidEntry = entry;
+        response = query -> bundle(invalidEntry, "");
+        failsInvalid();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"parse", "subject", "repeat", "unsafe"})
+    void failuresAfterAnExclusionRemainFailClosed(String defect) {
+        response = query -> {
+            if (!query.contains("page=2")) return bundle(missingClass("bad", "Patient/p1"), "?page=2");
+            return switch (defect) {
+                case "parse" -> "not-json";
+                case "subject" -> bundle(encounter("foreign", "Patient/other"), "");
+                case "repeat" -> bundle("", "?page=2");
+                case "unsafe" -> bundle("", "http://other.test/fhir?page=3");
+                default -> throw new AssertionError();
+            };
+        };
+        failsInvalid();
+    }
+
+    @Test
+    void externalFailureAfterExclusionPropagates() {
+        errorOnRequest = 2;
+        response = query -> bundle(missingClass("bad", "Patient/p1"), "?page=2");
         context().run(ctx -> assertThatThrownBy(() -> ctx.getBean(FhirEncounterClient.class).findByPatientId("p1"))
+                .isInstanceOfSatisfying(FhirServerException.class, failure ->
+                        assertThat(failure.type()).isEqualTo(FhirServerException.Type.UNAVAILABLE)));
+    }
+
+    private String missingClass(String id, String subject) { return missingClass(id, subject, ""); }
+    private String missingClass(String id, String subject, String extra) {
+        return encounter(id, subject, extra).replace(CLASS + ",", "");
+    }
+
+    private void failsInvalid() {
+        context().run(ctx -> assertThatThrownBy(() -> ctx.getBean(FhirEncounterClient.class).findByPatientId("p1").encounters())
                 .isInstanceOfSatisfying(FhirServerException.class, failure -> {
                     assertThat(failure.operation()).isEqualTo("encounter-search");
                     assertThat(failure.type()).isEqualTo(FhirServerException.Type.INVALID_RESPONSE);

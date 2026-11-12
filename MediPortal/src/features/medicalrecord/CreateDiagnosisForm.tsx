@@ -1,3 +1,4 @@
+import type { EncounterListResult } from './types.ts'
 import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react'
 import { Stethoscope, X } from 'lucide-react'
 import Alert from '../../components/ui/Alert.tsx'
@@ -26,7 +27,7 @@ import {
 } from './types.ts'
 
 export type DiagnosisEncounterState = { status: 'loading' } | { status: 'failed'; message: string }
-  | { status: 'loaded'; encounters: EncounterSummary[] }
+  | ({ status: 'loaded' } & EncounterListResult)
 
 export interface FieldError {
   field: DiagnosisField
@@ -147,6 +148,10 @@ export function CreateDiagnosisFormView({ encounterState, fields, fieldError, pe
           </button>
         </div>
       </fieldset>
+      {encounterState.status === 'loaded' && !encounterState.complete && <Alert tone="info" role="alert">
+        The encounter list is incomplete. {encounterState.excludedCount} encounters were excluded because source records are invalid.
+        {encounterState.encounters.length === 0 && ' No valid encounters are available.'}
+      </Alert>}
       {encounterState.status === 'failed' && (
         <Alert tone="info">{encounterState.message} You can still record the diagnosis without an encounter.</Alert>
       )}
@@ -166,7 +171,7 @@ interface CreateDiagnosisFormProps {
 /** Records a diagnosis for the open patient (DOCTOR and STAFF). */
 function CreateDiagnosisForm({ patientId, onCreated, onCancel, initialEncounters }: CreateDiagnosisFormProps) {
   const [encounterState, setEncounterState] = useState<DiagnosisEncounterState>(
-    initialEncounters ? { status: 'loaded', encounters: initialEncounters } : { status: 'loading' })
+    initialEncounters ? { status: 'loaded', encounters: initialEncounters, complete: true, excludedCount: 0 } : { status: 'loading' })
   const [fields, setFields] = useState<DiagnosisFields>(emptyDiagnosisFields)
   const [fieldError, setFieldError] = useState<FieldError | null>(null)
   const [pending, setPending] = useState(false)
@@ -178,8 +183,8 @@ function CreateDiagnosisForm({ patientId, onCreated, onCancel, initialEncounters
     if (initialEncounters) return undefined
     const controller = new AbortController()
     listPatientEncounters(patientId, { signal: controller.signal })
-      .then((encounters) => {
-        if (!controller.signal.aborted) setEncounterState({ status: 'loaded', encounters })
+      .then((result) => {
+        if (!controller.signal.aborted) setEncounterState({ status: 'loaded', ...result })
       })
       .catch((failure: unknown) => {
         if (!controller.signal.aborted) {

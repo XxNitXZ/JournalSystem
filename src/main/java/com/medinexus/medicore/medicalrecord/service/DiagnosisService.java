@@ -309,7 +309,7 @@ public class DiagnosisService {
     private Map<String, EncounterContext> visits(String patientId) {
         Map<String, EncounterContext> visits = new HashMap<>();
         try {
-            for (EncounterDto encounter : encounters.findByPatientId(patientId)) {
+            for (EncounterDto encounter : encounters.findByPatientId(patientId).encounters()) {
                 visits.put(encounter.id(), new EncounterContext(encounter.id(),
                         encounter.period() == null ? null : encounter.period().start(),
                         EncounterService.typeText(encounter.types())));

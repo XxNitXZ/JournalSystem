@@ -90,7 +90,7 @@ test('clinical notes: list, add form, validation, API and permissions', async (c
       // The button is not shown twice while the form is open.
       assert.doesNotMatch(html, /Add Clinical Note<\/button>/)
 
-      const selected = render.renderNoteForm({ status: 'loaded', encounters: visits }, 'enc-2', 'Hej då 🙂')
+      const selected = render.renderNoteForm({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits }, 'enc-2', 'Hej då 🙂')
       assert.match(selected, /<option value="enc-2" selected="">/)
       assert.match(selected, new RegExp(`Selected visit: ${encounterForm.formatVisitDate(visits[0].start)} · Consultation`))
       // "Hej då 🙂" is 8 characters: the emoji counts once.
@@ -98,18 +98,18 @@ test('clinical notes: list, add form, validation, API and permissions', async (c
     })
 
     await context.test('the form explains missing encounters and shows loading, saving and error states', () => {
-      const none = render.renderNoteForm({ status: 'loaded', encounters: [] })
+      const none = render.renderNoteForm({ status: 'loaded', complete: true, excludedCount: 0, encounters: [] })
       assert.match(none, /no encounters yet/)
       assert.match(none, /Create Encounter first/)
       assert.match(none, /<fieldset disabled="">/)
       assert.match(render.renderNoteForm({ status: 'loading' }), /Loading encounters…/)
       assert.match(render.renderNoteForm({ status: 'failed', message: 'The encounters could not be loaded.' }),
         /role="alert"[^>]*>.*could not be loaded/)
-      const saving = render.renderNoteForm({ status: 'loaded', encounters: visits }, 'enc-2', 'x', true)
+      const saving = render.renderNoteForm({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits }, 'enc-2', 'x', true)
       assert.match(saving, /Saving note…/)
       assert.match(saving, /aria-busy="true"/)
       assert.match(saving, /<fieldset disabled="">/)
-      const failed = render.renderNoteForm({ status: 'loaded', encounters: visits }, 'enc-2', 'x', false,
+      const failed = render.renderNoteForm({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits }, 'enc-2', 'x', false,
         'The note could not be saved. Please try again later.')
       assert.match(failed, /role="alert".*The note could not be saved/)
       assert.match(failed, />x<\/textarea>/, 'the text is kept after a failure')
@@ -237,7 +237,7 @@ test('clinical notes: list, add form, validation, API and permissions', async (c
       }
       assert.match(renderRoute(as('PATIENT'), '/patients/syn-patient-1'), /available to doctor or staff accounts only/)
       // The Encounters section is unchanged.
-      assert.match(encounterRender.renderSection({ status: 'loaded', encounters: visits }, 'syn-patient-1'),
+      assert.match(encounterRender.renderSection({ status: 'loaded', complete: true, excludedCount: 0, encounters: visits }, 'syn-patient-1'),
         /<button[^>]*>.*Create Encounter<\/button>/)
     })
   } finally {

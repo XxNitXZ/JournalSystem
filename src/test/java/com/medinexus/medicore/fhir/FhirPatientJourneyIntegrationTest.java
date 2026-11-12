@@ -191,12 +191,12 @@ class FhirPatientJourneyIntegrationTest {
             assertThat(idOf(condition.subject(), "Patient")).isEqualTo(PATIENT_ID);
 
             // 7. Search by Patient ID returns exactly this Patient's resources, identical to the reads.
-            assertThat(encounters.findByPatientId(PATIENT_ID)).containsExactly(encounter);
+            assertThat(encounters.findByPatientId(PATIENT_ID).encounters()).containsExactly(encounter);
             assertThat(observations.findByPatientId(PATIENT_ID).observations()).containsExactly(observation);
             assertThat(conditions.findByPatientId(PATIENT_ID)).containsExactly(condition);
             assertThat(observations.findByPatientId(OTHER_PATIENT_ID).observations()).singleElement()
                     .satisfies(other -> assertThat(other.id()).isEqualTo(otherObservationId));
-            assertThat(encounters.findByPatientId(OTHER_PATIENT_ID)).isEmpty();
+            assertThat(encounters.findByPatientId(OTHER_PATIENT_ID).encounters()).isEmpty();
             assertThat(conditions.findByPatientId(OTHER_PATIENT_ID)).isEmpty();
 
             // 8. Follow the Encounter's references with the owning clients: they resolve to the same resources.
@@ -270,7 +270,7 @@ class FhirPatientJourneyIntegrationTest {
     @Test
     void patientWithoutClinicalRecordsHasEmptySearchesAndAnUnknownPatientIsNotFound() {
         context().run(ctx -> {
-            assertThat(ctx.getBean(FhirEncounterClient.class).findByPatientId(PATIENT_ID)).isEmpty();
+            assertThat(ctx.getBean(FhirEncounterClient.class).findByPatientId(PATIENT_ID).encounters()).isEmpty();
             assertThat(ctx.getBean(FhirObservationClient.class).findByPatientId(PATIENT_ID).observations()).isEmpty();
             assertThat(ctx.getBean(FhirConditionClient.class).findByPatientId(PATIENT_ID)).isEmpty();
             assertThatThrownBy(() -> ctx.getBean(FhirPatientClient.class).readPatient("unknown-patient"))

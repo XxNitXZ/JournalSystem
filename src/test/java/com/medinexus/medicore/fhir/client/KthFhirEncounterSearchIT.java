@@ -88,12 +88,13 @@ class KthFhirEncounterSearchIT {
                             }
                         }
                     });
-                    var results = context.getBean(FhirEncounterClient.class).findByPatientId(id);
+                    var search = context.getBean(FhirEncounterClient.class).findByPatientId(id);
+                    var results = search.encounters();
                     assertThat(!results.isEmpty()).as("nonempty live Encounter results").isTrue();
-                    assertThat(results.size()).isEqualTo(resources.size());
+                    assertThat(results.size() + search.excludedCount()).isEqualTo(resources.size());
                     for (int i = 0; i < results.size(); i++) {
                         var dto = results.get(i);
-                        var source = resources.get(i);
+                        var source = resources.stream().filter(resource -> dto.id().equals(resource.getIdElement().getIdPart())).findFirst().orElseThrow();
                         assertThat(dto.subject() != null && (("Patient/" + id).equals(dto.subject().reference())
                                 || (client.getServerBase() + "/Patient/" + id).equals(dto.subject().reference())))
                                 .as("correct Patient reference").isTrue();
@@ -110,6 +111,7 @@ class KthFhirEncounterSearchIT {
                     assertThat(methods).isNotEmpty().containsOnly("GET").hasSizeLessThanOrEqualTo(10);
                     assertThat(statuses).hasSameSizeAs(methods).containsOnly(200);
                     System.out.println("Encounter search verification: encounterCount=" + results.size() + "; getCount=" + methods.size()
+                            + "; complete=" + search.complete() + "; excludedCount=" + search.excludedCount()
                             + "; additionalPageRequests=" + (methods.size() - 1));
                 });
     }
