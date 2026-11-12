@@ -8,6 +8,8 @@ import { ownRecordErrorMessage } from '../journalaccess/journalAccessText.ts'
 import PatientProfileView from '../patientmanagement/PatientProfileView.tsx'
 import { getOwnPatientRecord } from '../patientmanagement/patientService.ts'
 import type { PatientProfileDto } from '../patientmanagement/types.ts'
+import ObservationsSection from './ObservationsSection.tsx'
+import { listOwnObservations } from './observationService.ts'
 import ClinicalNotesSection from './ClinicalNotesSection.tsx'
 import { listOwnNotes } from './clinicalNoteService.ts'
 import DiagnosesSection from './DiagnosesSection.tsx'
@@ -44,6 +46,7 @@ function MyMedicalRecordPage() {
         <>
           <PatientProfileView patient={state.record} label="Your medical record" />
           <EncountersSection load={listOwnEncounters} emptyText="No visits have been recorded yet." />
+          <ObservationsSection load={listOwnObservations} />
           <DiagnosesSection load={listOwnDiagnoses} />
           <ClinicalNotesSection load={listOwnNotes} emptyText="No clinical notes have been recorded yet." />
         </>

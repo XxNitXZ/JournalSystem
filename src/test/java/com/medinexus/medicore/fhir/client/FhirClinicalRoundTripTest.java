@@ -146,7 +146,7 @@ class FhirClinicalRoundTripTest {
             }
             client.createObservation(new CreateObservationRequest("other-synthetic-patient", CreateObservationRequest.Status.FINAL,
                     code(), value, absent));
-            assertThat(client.findByPatientId("synthetic-patient")).containsExactly(dto);
+            assertThat(client.findByPatientId("synthetic-patient").observations()).containsExactly(dto);
             assertThat(requests).hasSize(4);
             assertThat(requests.get(0)).isEqualTo("POST /fhir/Observation");
             assertThat(requests.get(1)).isEqualTo("GET /fhir/Observation/" + id);

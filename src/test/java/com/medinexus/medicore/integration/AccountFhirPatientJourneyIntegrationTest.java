@@ -219,7 +219,7 @@ class AccountFhirPatientJourneyIntegrationTest {
             assertThat(encounter.serviceProvider().reference()).isEqualTo("Organization/" + clinicId);
             assertThat(encounter.locations().getFirst().location().reference()).isEqualTo("Location/" + wardId);
         });
-        assertThat(observations.findByPatientId(accountPatientId)).singleElement().satisfies(observation -> {
+        assertThat(observations.findByPatientId(accountPatientId).observations()).singleElement().satisfies(observation -> {
             assertThat(observation.id()).isEqualTo(observationId);
             assertThat(observation.subject().reference()).isEqualTo("Patient/" + patientId);
         });

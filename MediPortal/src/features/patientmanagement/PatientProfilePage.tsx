@@ -14,6 +14,8 @@ import { patientProfileErrorMessage } from './patientProfileErrorMessage.ts'
 import { getPatient } from './patientService.ts'
 import { canEditPatients } from './patientUpdate.ts'
 import type { PatientProfileDto } from './types.ts'
+import ObservationsSection from '../medicalrecord/ObservationsSection.tsx'
+import { listPatientObservations } from '../medicalrecord/observationService.ts'
 import ClinicalNotesSection from '../medicalrecord/ClinicalNotesSection.tsx'
 import { listPatientNotes } from '../medicalrecord/clinicalNoteService.ts'
 import DiagnosesSection from '../medicalrecord/DiagnosesSection.tsx'
@@ -52,6 +54,7 @@ function PatientProfile({ id }: { id: string }) {
   const [success, setSuccess] = useState('')
   const loadEncounters = useCallback((options: ApiRequestOptions) => listPatientEncounters(id, options), [id])
   const loadNotes = useCallback((options: ApiRequestOptions) => listPatientNotes(id, options), [id])
+  const loadObservations = useCallback((options: ApiRequestOptions) => listPatientObservations(id, options), [id])
   const loadDiagnoses = useCallback((options: ApiRequestOptions) => listPatientDiagnoses(id, options), [id])
 
   useEffect(() => {
@@ -85,6 +88,7 @@ function PatientProfile({ id }: { id: string }) {
         )}
       <Alert tone="success" role="status">{success}</Alert>
       <EncountersSection load={loadEncounters} createFor={canEditPatients(user?.role) ? id : undefined} />
+      <ObservationsSection load={loadObservations} createFor={canEditPatients(user?.role) ? id : undefined} />
       <DiagnosesSection load={loadDiagnoses} createFor={canEditPatients(user?.role) ? id : undefined} />
       <ClinicalNotesSection load={loadNotes} createFor={canEditPatients(user?.role) ? id : undefined} />
     </>

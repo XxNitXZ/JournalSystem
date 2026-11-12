@@ -15,6 +15,7 @@ import com.medinexus.medicore.fhir.client.FhirServerException;
 import com.medinexus.medicore.fhir.mapper.ObservationMapper;
 import com.medinexus.medicore.medicalrecord.dto.NewObservationRequest;
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto;
+import com.medinexus.medicore.medicalrecord.dto.ObservationSearchResult;
 import com.medinexus.medicore.patient.registry.PatientRegistry;
 import com.medinexus.medicore.patient.service.PatientNotFoundException;
 import com.medinexus.medicore.patient.service.OwnPatientRecordException;
@@ -53,7 +54,7 @@ public class ObservationService {
         return mapper.toDto(resource);
     }
 
-    public List<ObservationDto> listForPatient(UserDto principal, String patientId) {
+    public ObservationSearchResult listForPatient(UserDto principal, String patientId) {
         clinician(principal);
         validateId(patientId);
         access.checkPatientAccess(principal, patientId);
@@ -62,7 +63,7 @@ public class ObservationService {
         return observations.findByPatientId(patientId);
     }
 
-    public List<ObservationDto> listOwn(UserDto principal) {
+    public ObservationSearchResult listOwn(UserDto principal) {
         User account = account(principal);
         if (account.getRole() != Role.PATIENT) throw denied();
         String patientId = account.getFhirPatientId();

@@ -108,7 +108,10 @@ class KthFhirObservationSearchIT {
 
                     java.util.List<com.medinexus.medicore.medicalrecord.dto.ObservationDto> results;
                     try {
-                        results = context.getBean(FhirObservationClient.class).findByPatientId(patientId);
+                        var search = context.getBean(FhirObservationClient.class).findByPatientId(patientId);
+                        results = search.observations();
+                        System.out.println("Observation search completeness: complete=" + search.complete()
+                                + "; excludedCount=" + search.excludedCount());
                     } finally {
                         System.out.println("Observation search transport: getCount=" + methods.size() + "; statuses=" + statuses);
                     }

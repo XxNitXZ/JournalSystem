@@ -9,6 +9,8 @@ import java.util.Set;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.Observation;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.parser.DataFormatException;
@@ -16,10 +18,12 @@ import ca.uhn.fhir.parser.DataFormatException;
 import com.medinexus.medicore.fhir.mapper.ObservationMapper;
 import com.medinexus.medicore.medicalrecord.dto.CreateObservationRequest;
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto;
+import com.medinexus.medicore.medicalrecord.dto.ObservationSearchResult;
 
 @Component
 public class FhirObservationClient {
 
+    private static final Logger log = LoggerFactory.getLogger(FhirObservationClient.class);
     private static final int PAGE_SIZE = 100;
     private static final int MAX_PAGES = 10;
     private static final int MAX_RESULTS = 1_000;
@@ -59,25 +63,27 @@ public class FhirObservationClient {
     }
 
     /**
-     * Searches subject=Patient/{patientId}, following at most 10 pages / 1,000 results.
-     * Returns no partial results. Subjects must be exact relative or same-base absolute
+     * Searches subject=Patient/{patientId}, following at most 10 pages / 1,000 examined entries.
+     * Reports missing-status exclusions explicitly; all other failures remain fail-closed. Subjects must be exact relative or same-base absolute
      * versionless Patient references; identifier-only and versioned references fail closed.
      * Server next links must remain within the configured FHIR base.
      */
-    public List<ObservationDto> findByPatientId(String patientId) {
+    public ObservationSearchResult findByPatientId(String patientId) {
         if (patientId == null || !patientId.matches("[A-Za-z0-9.-]{1,64}")) {
             throw new IllegalArgumentException("A valid logical FHIR Patient ID is required");
         }
         return requestExecutor.execute("observation-search", () -> search(patientId));
     }
 
-    private List<ObservationDto> search(String patientId) {
+    private ObservationSearchResult search(String patientId) {
         String reference = "Patient/" + patientId;
         String base = fhirClient.getServerBase();
         URI current = URI.create(base + "/Observation");
         Set<URI> visited = new HashSet<>();
         visited.add(current);
         List<ObservationDto> results = new ArrayList<>();
+        int examined = 0;
+        int excluded = 0;
         Bundle bundle = fhirClient.search().forResource(Observation.class)
                 .where(Observation.SUBJECT.hasId(reference)).count(PAGE_SIZE)
                 .returnBundle(Bundle.class).execute();
@@ -93,15 +99,23 @@ public class FhirObservationClient {
                 if (!reference.equals(subject) && !(base + "/" + reference).equals(subject)) throw invalid();
                 if (observation.getSubject().hasType() && !"Patient".equals(observation.getSubject().getType())
                         && !"http://hl7.org/fhir/StructureDefinition/Patient".equals(observation.getSubject().getType())) throw invalid();
-                if (results.size() == MAX_RESULTS) throw invalid();
+                if (++examined > MAX_RESULTS) throw invalid();
                 try {
-                    results.add(mapper.toDto(observation));
+                    if (!observation.hasStatus()) {
+                        mapper.validateMissingStatusCandidate(observation);
+                        excluded++;
+                    } else {
+                        results.add(mapper.toDto(observation));
+                    }
                 } catch (IllegalArgumentException exception) {
                     throw invalid();
                 }
             }
             var links = bundle.getLink().stream().filter(link -> "next".equals(link.getRelation())).toList();
-            if (links.isEmpty()) return List.copyOf(results);
+            if (links.isEmpty()) {
+                if (excluded > 0) log.warn("FHIR search incomplete: operation=observation-search reason=MISSING_STATUS excludedCount={}", excluded);
+                return new ObservationSearchResult(results, excluded == 0, excluded);
+            }
             if (page == MAX_PAGES || links.size() != 1 || !links.getFirst().hasUrl()) throw invalid();
             URI next = nextUri(current, links.getFirst().getUrl(), URI.create(base));
             if (!visited.add(next)) throw invalid();

@@ -94,8 +94,8 @@ class ObservationIntegrationTest {
                 .andExpect(jsonPath("$.effective.data.value").value("2026-06-15T12:34:56.123456+02:00"));
         assertThat(STORED.getFirst().getValueQuantity().getValue()).isEqualByComparingTo("12.500");
         assertThat(STORED.getFirst().getEffectiveDateTimeType().getValueAsString()).isEqualTo("2026-06-15T12:34:56.123456+02:00");
-        mvc.perform(get(path(patientId)).with(as(clinician, role))).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
-        mvc.perform(get(path("me")).with(as(patient, Role.PATIENT))).andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value("created-1"));
+        mvc.perform(get(path(patientId)).with(as(clinician, role))).andExpect(status().isOk()).andExpect(jsonPath("$.observations.length()").value(1));
+        mvc.perform(get(path("me")).with(as(patient, Role.PATIENT))).andExpect(status().isOk()).andExpect(jsonPath("$.observations[0].id").value("created-1"));
         mvc.perform(get(path(patientId)).with(as(other, Role.PATIENT))).andExpect(status().isForbidden());
         wrongPatient = true;
         mvc.perform(get(path("me")).with(as(other, Role.PATIENT))).andExpect(status().isBadGateway());
@@ -120,10 +120,10 @@ class ObservationIntegrationTest {
             CALLS.clear();
             mvc.perform(get(path("me")).with(as(accountId, Role.PATIENT))
                             .param("patientId", foreignId).param("subject", "Patient/" + foreignId))
-                    .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
-                    .andExpect(jsonPath("$[0].id").value(expectedObservationId))
-                    .andExpect(jsonPath("$[0].code.text").value(expectedLabel))
-                    .andExpect(jsonPath("$[0].subject.reference").value("Patient/" + ownId));
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.observations.length()").value(1))
+                    .andExpect(jsonPath("$.observations[0].id").value(expectedObservationId))
+                    .andExpect(jsonPath("$.observations[0].code.text").value(expectedLabel))
+                    .andExpect(jsonPath("$.observations[0].subject.reference").value("Patient/" + ownId));
             assertThat(CALLS).hasSize(2);
             assertThat(CALLS.get(0)).isEqualTo("GET /fhir/Patient/" + ownId);
             assertThat(URLDecoder.decode(CALLS.get(1), StandardCharsets.UTF_8))
@@ -133,6 +133,49 @@ class ObservationIntegrationTest {
                     .andExpect(status().isForbidden());
             assertThat(CALLS).hasSize(before);
         }
+    }
+
+    @Test
+    void partialEnvelopesRemainPatientScopedForBothGetEndpoints() throws Exception {
+        for (String id : List.of(patientId, otherPatientId)) {
+            mvc.perform(post(path(id)).with(as(doctor, Role.DOCTOR)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(BODY))
+                    .andExpect(status().isCreated());
+        }
+        missingStatus(patientId, "excluded-first");
+        missingStatus(otherPatientId, "excluded-second");
+        missingStatus(otherPatientId, "excluded-third");
+        for (Long accountId : List.of(patient, other)) {
+            boolean first = accountId.equals(patient);
+            String ownId = first ? patientId : otherPatientId;
+            String foreignId = first ? otherPatientId : patientId;
+            for (boolean clinician : List.of(false, true)) {
+                mvc.perform(get(path(clinician ? ownId : "me")).with(as(clinician ? doctor : accountId, clinician ? Role.DOCTOR : Role.PATIENT))
+                                .param("patientId", foreignId).param("subject", "Patient/" + foreignId))
+                        .andExpect(status().isOk()).andExpect(jsonPath("$.observations.length()").value(1))
+                        .andExpect(jsonPath("$.observations[0].subject.reference").value("Patient/" + ownId))
+                        .andExpect(jsonPath("$.complete").value(false)).andExpect(jsonPath("$.excludedCount").value(first ? 1 : 2));
+            }
+            mvc.perform(get(path(foreignId)).with(as(accountId, Role.PATIENT))).andExpect(status().isForbidden());
+        }
+    }
+
+    @Test
+    void allExcludedAndEmptySearchHaveDifferentCompleteness() throws Exception {
+        missingStatus(patientId, "excluded");
+        for (boolean empty : List.of(false, true)) {
+            if (empty) STORED.clear();
+            mvc.perform(get(path("me")).with(as(patient, Role.PATIENT)))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.observations.length()").value(0))
+                    .andExpect(jsonPath("$.complete").value(empty)).andExpect(jsonPath("$.excludedCount").value(empty ? 0 : 1));
+        }
+    }
+
+    private void missingStatus(String patientId, String id) {
+        Observation observation = new Observation();
+        observation.setId(id);
+        observation.setSubject(new org.hl7.fhir.r4.model.Reference("Patient/" + patientId));
+        observation.getCode().setText("Synthetic missing status");
+        STORED.add(observation);
     }
 
     @ParameterizedTest @ValueSource(strings = {"2026", "2026-06", "2026-06-15", "2026-06-15T12:00:00Z", "2026-06-15T12:00:00.123456789123-05:30"})

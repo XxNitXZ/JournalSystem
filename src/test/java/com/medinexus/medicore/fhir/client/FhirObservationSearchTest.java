@@ -22,6 +22,7 @@ import com.medinexus.medicore.fhir.config.FhirClientConfig;
 import com.medinexus.medicore.fhir.mapper.ObservationMapper;
 import com.sun.net.httpserver.HttpServer;
 
+@org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
 class FhirObservationSearchTest {
     private HttpServer server;
     private String base;
@@ -71,7 +72,7 @@ class FhirObservationSearchTest {
     void mapsSingleResultAndSendsOnlyGetWithTypedSubjectAndCount() {
         response = query -> bundle(observation("o1", "Patient/p1"), "");
         context().run(ctx -> {
-            var results = ctx.getBean(FhirObservationClient.class).findByPatientId("p1");
+            var results = ctx.getBean(FhirObservationClient.class).findByPatientId("p1").observations();
             assertThat(results).hasSize(1);
             assertThat(results.getFirst().id()).isEqualTo("o1");
             assertThat(results.getFirst().value().type().name()).isEqualTo("BOOLEAN");
@@ -86,13 +87,13 @@ class FhirObservationSearchTest {
     @Test
     void mapsMultipleResultsIncludingSameServerAbsolutePatientReference() {
         response = query -> bundle(observation("o1", "Patient/p1") + "," + observation("o2", base + "/Patient/p1"), "");
-        context().run(ctx -> assertThat(ctx.getBean(FhirObservationClient.class).findByPatientId("p1"))
+        context().run(ctx -> assertThat(ctx.getBean(FhirObservationClient.class).findByPatientId("p1").observations())
                 .extracting(dto -> dto.id()).containsExactly("o1", "o2"));
     }
 
     @Test
     void returnsEmptyListForEmptySearch() {
-        context().run(ctx -> assertThat(ctx.getBean(FhirObservationClient.class).findByPatientId("p1")).isEmpty());
+        context().run(ctx -> assertThat(ctx.getBean(FhirObservationClient.class).findByPatientId("p1").observations()).isEmpty());
     }
 
     @ParameterizedTest
@@ -103,7 +104,7 @@ class FhirObservationSearchTest {
         response = query -> query.equals("page=2") ? bundle(observation("o2", "Patient/p1"), "")
                 : bundle(observation("o1", "Patient/p1"), next);
         context().run(ctx -> {
-            assertThat(ctx.getBean(FhirObservationClient.class).findByPatientId("p1"))
+            assertThat(ctx.getBean(FhirObservationClient.class).findByPatientId("p1").observations())
                     .extracting(dto -> dto.id()).containsExactly("o1", "o2");
             assertThat(requests).hasSize(2);
             assertThat(requests.get(1)).isEqualTo("GET /fhir/Observation?page=2");
@@ -207,8 +208,6 @@ class FhirObservationSearchTest {
 
     @Test
     void rejectsMalformedOrUnsupportedObservationsWithoutPartialResults() {
-        response = query -> bundle(observation("o1", "Patient/p1").replace("\"status\":\"final\",", ""), "");
-        failsInvalid();
         response = query -> bundle(observation("o1", "Patient/p1").replace("\"valueBoolean\":false", "\"valueSampledData\":{\"dimensions\":1}"), "");
         failsInvalid();
     }
@@ -225,6 +224,120 @@ class FhirObservationSearchTest {
                     assertThat(failure.httpStatus()).hasValue(503);
                 }));
         assertThat(requests).hasSize(requestNumber);
+    }
+
+    @Test
+    void reportsMissingStatusAndContinuesLaterEntries(org.springframework.boot.test.system.CapturedOutput output) {
+        response = query -> bundle(observation("valid-before", "Patient/p1") + ","
+                + missingStatus("SECRET-OBS-ID", "Patient/p1") + "," + observation("valid-after", "Patient/p1"), "");
+        context().run(ctx -> {
+            var result = ctx.getBean(FhirObservationClient.class).findByPatientId("p1");
+            assertThat(result.observations()).extracting(dto -> dto.id()).containsExactly("valid-before", "valid-after");
+            assertThat(result.complete()).isFalse();
+            assertThat(result.excludedCount()).isEqualTo(1);
+        });
+        assertThat(output.getAll()).contains("reason=MISSING_STATUS excludedCount=1")
+                .doesNotContain("SECRET-OBS-ID", "Patient/p1");
+    }
+
+    @Test
+    void followsAllPagesAfterExclusions() {
+        response = query -> query.equals("page=2")
+                ? bundle(missingStatus("bad-2", "Patient/p1") + "," + observation("good-2", "Patient/p1"), "")
+                : bundle(missingStatus("bad-1", "Patient/p1"), "?page=2");
+        context().run(ctx -> {
+            var result = ctx.getBean(FhirObservationClient.class).findByPatientId("p1");
+            assertThat(result.observations()).extracting(dto -> dto.id()).containsExactly("good-2");
+            assertThat(result.complete()).isFalse();
+            assertThat(result.excludedCount()).isEqualTo(2);
+        });
+        assertThat(requests).hasSize(2);
+    }
+
+    @Test
+    void distinguishesAllExcludedFromGenuinelyEmpty() {
+        response = query -> bundle(missingStatus("bad", "Patient/p1"), "");
+        context().run(ctx -> {
+            var result = ctx.getBean(FhirObservationClient.class).findByPatientId("p1");
+            assertThat(result.observations()).isEmpty();
+            assertThat(result.complete()).isFalse();
+            assertThat(result.excludedCount()).isEqualTo(1);
+        });
+        response = query -> bundle("", "");
+        context().run(ctx -> {
+            var result = ctx.getBean(FhirObservationClient.class).findByPatientId("p1");
+            assertThat(result.observations()).isEmpty();
+            assertThat(result.complete()).isTrue();
+            assertThat(result.excludedCount()).isZero();
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Patient/other", "Practitioner/p1", "#p1", "Patient/p1/_history/1"})
+    void missingStatusNeverBypassesPatientValidation(String subject) {
+        response = query -> bundle(missingStatus("bad", subject), "");
+        failsInvalid();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"code", "id", "subject", "value", "effective", "component", "conflict"})
+    void missingStatusDoesNotHideOtherInvalidContent(String field) {
+        String entry = missingStatus("bad", "Patient/p1");
+        entry = switch (field) {
+            case "code" -> entry.replace("\"code\":{\"text\":\"Synthetic\"},", "");
+            case "id" -> entry.replace("\"id\":\"bad\",", "");
+            case "subject" -> entry.replace("\"subject\":{\"reference\":\"Patient/p1\"},", "");
+            case "value" -> entry.replace("\"valueBoolean\":false", "\"valueSampledData\":{\"dimensions\":1}");
+            case "effective" -> entry.replace("\"valueBoolean\":false", "\"effectiveTiming\":{\"event\":[\"2026\"]}");
+            case "component" -> entry.replace("\"valueBoolean\":false", "\"component\":[{\"valueBoolean\":false}]");
+            default -> entry.replace("\"valueBoolean\":false", "\"valueBoolean\":false,\"dataAbsentReason\":{\"text\":\"Unknown\"}");
+        };
+        String body = bundle(entry, "");
+        response = query -> body;
+        failsInvalid();
+    }
+
+    @Test
+    void excludedResourcesCountTowardLimit() {
+        String entries = java.util.stream.IntStream.range(0, 1000).mapToObj(i -> missingStatus("bad-" + i, "Patient/p1"))
+                .collect(java.util.stream.Collectors.joining(","));
+        response = query -> bundle(entries, "");
+        context().run(ctx -> {
+            var result = ctx.getBean(FhirObservationClient.class).findByPatientId("p1");
+            assertThat(result.observations()).isEmpty();
+            assertThat(result.excludedCount()).isEqualTo(1000);
+            assertThat(result.complete()).isFalse();
+        });
+        response = query -> bundle(entries + "," + observation("overflow", "Patient/p1"), "");
+        failsInvalid();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"parse", "subject", "next", "resource", "limit"})
+    void laterUnsafeResponsesFailClosedEvenAfterExclusions(String reason) {
+        response = query -> {
+            if (!query.equals("page=2")) return bundle(missingStatus("bad", "Patient/p1"), "?page=2");
+            return switch (reason) {
+                case "parse" -> "not JSON";
+                case "subject" -> bundle(observation("wrong", "Patient/other"), "");
+                case "resource" -> bundle("{\"resource\":{\"resourceType\":\"Patient\",\"id\":\"p1\"}}", "");
+                case "limit" -> bundle("", "?page=2");
+                default -> bundle("", "https://other.test/fhir/Observation?page=3");
+            };
+        };
+        failsInvalid();
+    }
+
+    @Test
+    void externalFailureAfterExclusionDoesNotReturnPartialEnvelope() {
+        errorOnRequest = 2;
+        response = query -> bundle(missingStatus("bad", "Patient/p1"), "?page=2");
+        context().run(ctx -> assertThatThrownBy(() -> ctx.getBean(FhirObservationClient.class).findByPatientId("p1"))
+                .isInstanceOfSatisfying(FhirServerException.class, failure -> assertThat(failure.type()).isEqualTo(FhirServerException.Type.UNAVAILABLE)));
+    }
+
+    private String missingStatus(String id, String subject) {
+        return observation(id, subject).replace("\"status\":\"final\",", "");
     }
 
     private void failsInvalid() {

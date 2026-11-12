@@ -143,3 +143,42 @@ export interface NewDiagnosisRequest {
   onsetDate?: string
   encounterId?: string
 }
+
+export interface ObservationConcept {
+  text: string | null
+  coding: { system: string | null; version?: string | null; code: string | null; display: string | null }[]
+}
+export interface ObservationQuantity { value: number | null; comparator: string | null; unit: string | null; system: string | null; code: string | null }
+export type ObservationValue =
+  | { type: 'QUANTITY'; data: ObservationQuantity }
+  | { type: 'CODEABLE_CONCEPT'; data: ObservationConcept }
+  | { type: 'STRING' | 'TIME' | 'DATE_TIME'; data: { value: string | null } }
+  | { type: 'BOOLEAN'; data: { value: boolean | null } }
+  | { type: 'INTEGER'; data: { value: number | null } }
+  | { type: 'RANGE'; data: { low: ObservationQuantity | null; high: ObservationQuantity | null } }
+  | { type: 'RATIO'; data: { numerator: ObservationQuantity | null; denominator: ObservationQuantity | null } }
+  | { type: 'PERIOD'; data: { start: string | null; end: string | null } }
+export interface ObservationComponent { code: ObservationConcept; value: ObservationValue | null; dataAbsentReason: ObservationConcept | null }
+export interface PatientObservation extends ObservationComponent {
+  id: string
+  status: string
+  subject: { reference: string | null } | null
+  components: ObservationComponent[]
+  effective: ObservationValue | null
+  issued: string | null
+}
+export interface NewObservationRequest {
+  status: 'FINAL'
+  code: { text: string }
+  effectiveDateTime: string
+  valueQuantity?: { value: number; unit?: string; system?: string; code?: string }
+  valueCodeableConcept?: { text: string }
+  dataAbsentReason?: { text: string }
+}
+
+/** Explicit completeness metadata from fully traversed Observation GET searches. */
+export interface ObservationSearchResult {
+  observations: PatientObservation[]
+  complete: boolean
+  excludedCount: number
+}

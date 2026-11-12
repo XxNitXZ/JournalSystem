@@ -1,7 +1,6 @@
 package com.medinexus.medicore.medicalrecord.controller;
 
 import java.net.URI;
-import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.fhir.client.FhirServerException;
 import com.medinexus.medicore.medicalrecord.dto.ObservationDto;
+import com.medinexus.medicore.medicalrecord.dto.ObservationSearchResult;
 import com.medinexus.medicore.medicalrecord.dto.NewObservationRequest;
 import com.medinexus.medicore.medicalrecord.service.ObservationService;
 import com.medinexus.medicore.patient.service.PatientNotFoundException;
@@ -41,12 +41,12 @@ public class ObservationController {
     }
 
     @GetMapping("/api/patients/me/observations")
-    public List<ObservationDto> own(@AuthenticationPrincipal UserDto principal) {
+    public ObservationSearchResult own(@AuthenticationPrincipal UserDto principal) {
         return observations.listOwn(principal);
     }
 
     @GetMapping("/api/patients/{patientId}/observations")
-    public List<ObservationDto> list(@AuthenticationPrincipal UserDto principal, @PathVariable String patientId) {
+    public ObservationSearchResult list(@AuthenticationPrincipal UserDto principal, @PathVariable String patientId) {
         return observations.listForPatient(principal, patientId);
     }
 

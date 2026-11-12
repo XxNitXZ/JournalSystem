@@ -353,7 +353,7 @@ class FhirUnavailableServerTest {
             assertThatThrownBy(() -> ctx.getBean(FhirLocationClient.class).updateLocation("secret-loc-77", "1", location()))
                     .isInstanceOfSatisfying(FhirServerException.class, failure -> assertThat(failure.httpStatus()).hasValue(404));
             // A Patient without records is not an error.
-            assertThat(ctx.getBean(FhirObservationClient.class).findByPatientId(SECRET_PATIENT)).isEmpty();
+            assertThat(ctx.getBean(FhirObservationClient.class).findByPatientId(SECRET_PATIENT).observations()).isEmpty();
             assertThat(ctx.getBean(FhirConditionClient.class).findByPatientId(SECRET_PATIENT)).isEmpty();
             assertThat(ctx.getBean(FhirEncounterClient.class).findByPatientId(SECRET_PATIENT)).isEmpty();
         });

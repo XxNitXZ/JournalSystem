@@ -49,6 +49,20 @@ public class ObservationMapper {
                 observation.hasIssued() ? observation.getIssuedElement().getValueAsString() : null);
     }
 
+
+    public void validateMissingStatusCandidate(Observation observation) {
+        if (observation == null || observation.hasStatus() || !observation.hasCode()
+                || observation.hasValue() && observation.hasDataAbsentReason()) {
+            throw new IllegalArgumentException("Observation is not a missing-status-only candidate");
+        }
+        concept(observation.getCode());
+        if (observation.hasValue()) value(observation.getValue());
+        if (observation.hasDataAbsentReason()) concept(observation.getDataAbsentReason());
+        if (observation.hasEffective()) effective(observation.getEffective());
+        if (observation.hasIssued()) observation.getIssuedElement().getValueAsString();
+        observation.getComponent().forEach(this::component);
+    }
+
     private ObservationValue effective(Type effective) {
         if (effective instanceof DateTimeType || effective instanceof Period) return value(effective);
         throw new IllegalArgumentException("Observation effective type is not supported by this projection");
