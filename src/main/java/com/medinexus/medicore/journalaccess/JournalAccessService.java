@@ -2,6 +2,8 @@ package com.medinexus.medicore.journalaccess;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -32,6 +34,7 @@ import com.medinexus.medicore.journalaccess.dto.JournalAccessRequestSummary;
 import com.medinexus.medicore.journalaccess.dto.JournalAccessStatusDto;
 import com.medinexus.medicore.patient.dto.PatientDto;
 import com.medinexus.medicore.patient.validation.Personnummer;
+import com.medinexus.medicore.patient.validation.PatientPersonnummer;
 
 /**
  * Journal access requests: created only when a PATIENT asks for access ({@link #requestAccess}), reviewed by
@@ -191,20 +194,23 @@ public class JournalAccessService {
         }
         JournalAccessRequestDetail.PatientRecord record = null;
         JournalAccessRequestDetail.RecordStatus recordStatus;
+        PatientPersonnummer recordPersonnummer = null;
         try {
             Patient patient = patients.readPatient(request.getFhirPatientId());
             if (patient == null || !request.getFhirPatientId().equals(patient.getIdElement().getIdPart())) {
                 recordStatus = JournalAccessRequestDetail.RecordStatus.UNAVAILABLE;
             } else {
-                record = record(mapper.toDto(patient));
+                recordPersonnummer = PatientPersonnummer.of(patient,
+                        LocalDate.now(clock.withZone(ZoneId.of("Europe/Stockholm"))));
+                record = record(mapper.toDto(patient), recordPersonnummer);
                 recordStatus = JournalAccessRequestDetail.RecordStatus.AVAILABLE;
             }
         } catch (FhirServerException failure) {
             recordStatus = isMissing(failure) ? JournalAccessRequestDetail.RecordStatus.NOT_FOUND
                     : JournalAccessRequestDetail.RecordStatus.UNAVAILABLE;
         }
-        boolean matches = record != null && account.getPersonnummer() != null
-                && account.getPersonnummer().equals(record.personnummer());
+        // Canonical comparison: YYYYMMDD-XXXX in FHIR is the same personnummer as YYYYMMDDXXXX on the account.
+        boolean matches = recordPersonnummer != null && recordPersonnummer.matches(account.getPersonnummer());
         return new JournalAccessRequestDetail(request.getId(), request.getStatus(), request.getCreatedAt(),
                 request.getReviewedAt(), account(account), record, recordStatus, matches);
     }
@@ -234,7 +240,9 @@ public class JournalAccessService {
         if (patient == null || !fhirPatientId.equals(patient.getIdElement().getIdPart())) {
             throw conflict("FHIR_PATIENT_MISSING");
         }
-        if (account.getPersonnummer() == null || !account.getPersonnummer().equals(personnummerOf(patient))) {
+        // Canonical comparison (YYYYMMDDXXXX or YYYYMMDD-XXXX in FHIR); conflicting personnummer never match.
+        if (account.getPersonnummer() == null || !PatientPersonnummer.of(patient,
+                LocalDate.now(clock.withZone(ZoneId.of("Europe/Stockholm")))).matches(account.getPersonnummer())) {
             throw conflict("PERSONNUMMER_MISMATCH");
         }
 
@@ -338,20 +346,17 @@ public class JournalAccessService {
                 request.getReviewedAt());
     }
 
-    private static JournalAccessRequestDetail.PatientRecord record(PatientDto patient) {
+    /** The record for review; a valid personnummer in its canonical 12-digit form, otherwise as stored. */
+    private static JournalAccessRequestDetail.PatientRecord record(PatientDto patient, PatientPersonnummer canonical) {
         var name = patient.names().stream().filter(candidate -> "official".equals(candidate.use())).findFirst()
                 .or(() -> patient.names().stream().findFirst());
-        String personnummer = patient.identifiers().stream()
-                .filter(identifier -> Personnummer.SYSTEM.equals(identifier.system())).map(PatientDto.PatientIdentifier::value)
-                .findFirst().orElse(null);
+        String personnummer = canonical.status() == PatientPersonnummer.Status.VALID ? canonical.value()
+                : patient.identifiers().stream().filter(identifier -> Personnummer.SYSTEM.equals(identifier.system()))
+                        .map(PatientDto.PatientIdentifier::value).findFirst().orElse(null);
         return new JournalAccessRequestDetail.PatientRecord(name.map(PatientDto.PatientName::given).orElse(List.of()),
                 name.map(PatientDto.PatientName::family).orElse(null), personnummer, patient.gender(), patient.birthDate());
     }
 
-    private static String personnummerOf(Patient patient) {
-        return patient.getIdentifier().stream().filter(identifier -> Personnummer.SYSTEM.equals(identifier.getSystem()))
-                .map(identifier -> identifier.getValue()).findFirst().orElse(null);
-    }
 
     private static boolean isMissing(FhirServerException failure) {
         int status = failure.httpStatus().orElse(0);

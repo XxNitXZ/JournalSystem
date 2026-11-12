@@ -5,7 +5,8 @@ MediCore and the external, shared **HAPI FHIR R4 server** run by KTH. Each kind
 of data has exactly **one authoritative owner**:
 
 - **HAPI FHIR owns all clinical and care-organization data**: Patient,
-  Practitioner, Observation, Condition, Encounter, Organization and Location.
+  Practitioner, Observation, Condition, Encounter, DocumentReference (clinical
+  notes), Organization and Location.
 - **PostgreSQL owns local accounts**: login identity, the account holder's first
   and last name and personnummer, phone number, password hash, role and the logical IDs that link an account to its FHIR Patient or Practitioner,
   plus journal access requests (which account asks for which FHIR Patient, and the doctor's decision)
@@ -28,7 +29,8 @@ explains how it was checked.
 | Messages between users | PostgreSQL | `messages` (sender/recipient account IDs, content, creation time) | persistence implemented (V10); sending, reading and authorization flows not yet implemented |
 | Patient | HAPI FHIR | KTH server | implemented (read; register via `POST /api/patients`, US-04.01; profile via `GET /api/patients/{id}`, US-04.02; search via `POST /api/patients/search`; own record via `GET /api/patients/me`, US-04.03; gender updated via `PATCH /api/patients/{id}`, US-04.04), limited to Patients in `registered_patients` or linked to an account |
 | Practitioner | HAPI FHIR | KTH server | implemented (read) |
-| Observation, Condition, Encounter | HAPI FHIR | KTH server | implemented (read, create, search by patient) |
+| Observation, Condition, Encounter | HAPI FHIR | KTH server | implemented (read, create, search by patient); Encounters created and listed through MediCore since US-05.05 (`/api/patients/{id}/encounters`, `/api/patients/me/encounters`), Conditions (diagnoses) since US-05.02 (`/api/patients/{id}/conditions`, `/api/patients/me/conditions`); never copied to PostgreSQL |
+| Clinical notes (DocumentReference) | HAPI FHIR | KTH server | implemented (US-05.01): created and listed through MediCore (`/api/patients/{id}/notes`, `/api/patients/me/notes`); note text and metadata only in HAPI FHIR, never copied to PostgreSQL |
 | Organization, Location | HAPI FHIR | KTH server | implemented (read, create, update) |
 | Login session | MediCore memory | in-memory HTTP session | implemented (not persisted) |
 
@@ -41,7 +43,7 @@ Hibernate never changes it (`spring.jpa.hibernate.ddl-auto=none`).
 |---|---|---|---|
 | `persistence_check` | `id`, `description` | Technical JPA check; holds no application or patient data | V1 |
 | `users` | `id`, `email` (unique), `password_hash`, `role` (`PATIENT`, `DOCTOR`, `STAFF`), `given_name`, `family_name`, `personnummer` (unique, 12 digits, nullable for older accounts), `phone_number` (optional, `+` and 6-15 digits, not unique), `fhir_patient_id`, `fhir_practitioner_id` | Local accounts, the account holder's display name, personal identity number and contact details, and FHIR ID references | V2, V3, V4, V6, V9 |
-| `registered_patients` | `fhir_patient_id` (primary key), `registered_by` (account, `ON DELETE SET NULL`), `registered_at` | Logical IDs of the Patients that MediCore registered in FHIR; no patient data | V5 |
+| `registered_patients` | `fhir_patient_id` (primary key), `registered_by` (account, `ON DELETE SET NULL`), `registered_at` | Logical IDs of the Patients that belong to MediCore: registered (created) in FHIR by MediCore or imported (existing Patients, reference only); no patient data | V5 |
 | `journal_access_requests` | `id`, `user_id` (account, `ON DELETE CASCADE`), `fhir_patient_id` (references `registered_patients`, `ON DELETE RESTRICT`; `NULL` only while `AWAITING_RECORD`), `status` (`AWAITING_RECORD`, `PENDING`, `APPROVED`, `REJECTED`), `reviewed_by` (account, `ON DELETE SET NULL`), `created_at`, `reviewed_at` | A PATIENT account's own request for access to its journal (created only when the patient asks), the FHIR Patient with the same personnummer once registered, and the doctor's decision; at most one open (`AWAITING_RECORD`/`PENDING`) request per account (partial unique index) | V7, V8 |
 | `flyway_schema_history` | (Flyway) | Applied migrations | – |
 | `messages` | `id`, `sender_id`, `recipient_id`, `content`, `created_at` | Local user-authored messages; distinct participants, restrictive account foreign keys, nonblank content up to 5,000 characters, creation timestamp immutable through JPA | V10 |
@@ -69,9 +71,9 @@ Existing application writes to PostgreSQL are performed by:
   `fhir_practitioner_id` with a conditional update. It is called only by the
   trusted operator command `FhirIdentityProvisioning`, never by a public
   endpoint (see [fhir/README.md](fhir/README.md#trusted-local-account-provisioning)).
-- `PatientRegistry`: after a successful Patient registration in FHIR, records
-  its logical ID, the registering account and the time in
-  `registered_patients`. Patient search and profile reads are limited to these
+- `PatientRegistry`: after a successful Patient registration in FHIR, or when DOCTOR/STAFF import an existing
+  FHIR Patient (`POST /api/patients/import`, atomic `INSERT … ON CONFLICT DO NOTHING`), records its logical ID, the
+  registering or importing account and the time in `registered_patients`; an import never writes to FHIR. Patient search and profile reads are limited to these
   IDs and to `users.fhir_patient_id` (see
   [fhir/README.md](fhir/README.md#patient-search-and-the-patient-registry)).
 - `JournalAccessService.requestAccess`: the **only** place a journal access request is created, when the
@@ -99,17 +101,19 @@ FHIR. It is personal data, so access to the database must be restricted accordin
 | Patient | read, conditional create, search, version-aware update (gender only) | `FhirPatientClient` | `patient/dto/PatientDto`, `PatientProfileDto`, `CreatePatientRequest`, `UpdatePatientRequest` |
 | Practitioner | read | `FhirPractitionerClient` | `practitioner/dto/PractitionerDto` |
 | Observation | read, create, search by patient | `FhirObservationClient` | `medicalrecord/dto/ObservationDto`, `CreateObservationRequest` |
-| Condition | read, create, search by patient | `FhirConditionClient` | `medicalrecord/dto/ConditionDto`, `CreateConditionRequest` |
-| Encounter | read, create, search by patient | `FhirEncounterClient` | `medicalrecord/dto/EncounterDto`, `CreateEncounterRequest` |
+| Condition | read, create, search by patient | `FhirConditionClient` | `medicalrecord/dto/ConditionDto`, `CreateConditionRequest`; API: `NewDiagnosisRequest`, `DiagnosisDto` |
+| Encounter | read, create, search by patient | `FhirEncounterClient` | `medicalrecord/dto/EncounterDto`, `CreateEncounterRequest`; API: `NewEncounterRequest`, `EncounterSummaryDto` |
+| DocumentReference | create, search by patient (`subject`) | `FhirDocumentReferenceClient` | API: `CreateClinicalNoteRequest`, `ClinicalNoteDto` (decoded text, no FHIR JSON) |
 | Organization | read, create, update | `FhirOrganizationClient` | `organization/dto/OrganizationDto`, `OrganizationWriteRequest` |
 | Location | read, create, update | `FhirLocationClient` | `location/dto/LocationDto`, `LocationWriteRequest` |
 
 - The DTOs are immutable **read projections** and request records. They are
   never persisted and nothing caches FHIR responses.
 - References **between** FHIR resources are FHIR data and are not mirrored in
-  PostgreSQL: `Observation.subject`, `Condition.subject`, `Encounter.subject`,
+  PostgreSQL: `Observation.subject`, `Condition.subject`, `Condition.encounter`, `Condition.recorder`, `Encounter.subject`,
   `Encounter.participant.individual`, `Encounter.serviceProvider`,
-  `Encounter.location.location`, `Organization.partOf`,
+  `Encounter.location.location`, `DocumentReference.subject`,
+  `DocumentReference.context.encounter`, `DocumentReference.author`, `Organization.partOf`,
   `Location.managingOrganization` and `Location.partOf`.
 - Organization and Location IDs are **not** stored in PostgreSQL.
 - The KTH server is shared and unauthenticated: only synthetic data, see
@@ -183,11 +187,15 @@ Rules (enforced by migration V3, `AccountFhirIdentityService` and, for approvals
 | Patient updates (US-04.04) | implemented: `PATCH /api/patients/{id}` (DOCTOR, STAFF) and "Edit Patient" in MediPortal; the gender only, in HAPI FHIR; names, personnummer, birth date and ID immutable; nothing stored in PostgreSQL |
 | Account management | implemented: optional phone number at registration (V9); read-only names and personnummer; e-mail (with current password) and phone changes; password change (`/api/auth/profile`, `/api/auth/password`) |
 | Own medical record (US-04.03) | implemented: `GET /api/patients/me` (PATIENT, linked accounts only) and MediPortal `/patient/record`; read directly from HAPI FHIR |
-| FHIR clients for the seven resource types above | implemented; production callers: account linking and patient registration |
+| FHIR clients for the seven resource types above | implemented; production callers: account linking, patient management, journal access and encounter management |
+| Encounter management (US-05.05) | implemented: `POST/GET /api/patients/{id}/encounters` (DOCTOR, STAFF; Patients known to MediCore only), `GET /api/patients/me/encounters` (PATIENT with an approved link), `GET /api/practitioners` (Practitioners linked to DOCTOR/STAFF accounts); Encounters only in HAPI FHIR, no table, no migration; MediPortal patient profile and My Medical Record |
+| Diagnoses (US-05.02) | implemented: `POST/GET /api/patients/{id}/conditions` (DOCTOR, STAFF; recording requires a linked Practitioner, which becomes the recorder; Patients known to MediCore; optional Encounter of that Patient), `GET /api/patients/me/conditions` (PATIENT with an approved link); FHIR R4 Condition only in HAPI FHIR (all of a Patient's Conditions are listed, also those of imported Patients), no table, no migration; MediPortal patient profile and My Medical Record |
+| Clinical notes (US-05.01) | implemented: `POST/GET /api/patients/{id}/notes` (DOCTOR, STAFF; writing requires a linked Practitioner, which becomes the author; Patients known to MediCore and an existing Encounter of that Patient), `GET /api/patients/me/notes` (PATIENT with an approved link); FHIR R4 DocumentReference with plain UTF-8 text only in HAPI FHIR, no table, no migration; MediPortal patient profile and My Medical Record |
 | Patient registration (US-04.01) | implemented: `POST /api/patients` (DOCTOR, STAFF) and MediPortal `/patients/new`; the Patient, including its personnummer, is stored only in HAPI FHIR |
 | Patient profile (US-04.02) | implemented: `GET /api/patients/{id}` (DOCTOR, STAFF) and MediPortal `/patients/{id}`; read directly from HAPI FHIR on every request, never stored or cached (see the limitations in [fhir/README.md](fhir/README.md#patient-profile-us-0402)) |
 | Patient search | implemented: `POST /api/patients/search` (DOCTOR, STAFF) and the search on the doctor and staff dashboards; only Patients known to MediCore (registry or account link) |
-| Other REST endpoints or UI for clinical data | **not implemented** (`medicalrecord` controller/service/repository and `patient/repository` contain only `.gitkeep`) |
+| Import existing patient | implemented: `POST /api/patients/import/search` (bounded, read-only discovery on the whole FHIR server) and `POST /api/patients/import` (DOCTOR, STAFF), MediPortal `/patients/import`; reference import into `registered_patients` only, no FHIR write, no demographics in PostgreSQL |
+| Other REST endpoints or UI for clinical data (Observation, Condition, Organization, Location) | **not implemented** (`medicalrecord/repository` and `patient/repository` contain only `.gitkeep`) |
 | Messaging | **not implemented** (`messaging` packages contain only `.gitkeep`; no tables) |
 | Self-service account linking, search for Organization or Location, Observation/Condition linked to an Encounter | not implemented |
 
@@ -221,12 +229,15 @@ grep -rhnE "CREATE TABLE|ALTER TABLE|ADD COLUMN" src/main/resources/db/migration
 # No other persistence, caching or browser storage (expected: no output)
 grep -rnE "JdbcTemplate|EntityManager|@Cacheable|CacheManager" src/main/java
 grep -rnE "localStorage|sessionStorage|/fhir|hapi-fhir" MediPortal/src
-# FHIR clients used outside the fhir package: account linking, patient management and journal access
+# FHIR clients used outside the fhir package: account linking, patient management, journal access, encounters, notes and diagnoses
 grep -rlnE "Fhir[A-Za-z]+Client" src/main/java | grep -v "/fhir/"
 ```
 
 Expected result of the last command: `auth/service/AccountFhirIdentityService.java`,
 `journalaccess/JournalAccessMatcher.java`, `journalaccess/JournalAccessService.java`,
-`patient/service/PatientService.java` and `provisioning/FhirIdentityProvisioning.java`.
+`medicalrecord/service/ClinicalNoteService.java`, `medicalrecord/service/DiagnosisService.java`, `medicalrecord/service/EncounterService.java`,
+`patient/dto/PatientDiscoveryResponse.java` (documentation reference only), `patient/service/PatientImportService.java`,
+`patient/service/PatientService.java`,
+`practitioner/service/PractitionerDirectory.java` and `provisioning/FhirIdentityProvisioning.java`.
 MediPortal calls MediCore, never the FHIR server. Runtime verification of a
 complete patient journey and of FHIR outages is planned in NIT-137 and NIT-138.

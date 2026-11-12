@@ -77,11 +77,78 @@ public class FhirPatientClient {
         });
     }
 
+    /** Page size of a discovery search (import of existing Patients). */
+    public static final int DISCOVERY_PAGE_SIZE = 20;
+    /** At most this many pages (FHIR requests) per discovery search. */
+    public static final int DISCOVERY_MAX_PAGES = 5;
+    /** At most this many Patients per discovery search; more are reported as truncated. */
+    public static final int DISCOVERY_MAX_RESULTS = 100;
+
+    /** Result of a discovery search: the Patients found, and whether more exist than were fetched. */
+    public record Discovery(List<Patient> patients, boolean truncated) {
+        public Discovery {
+            patients = List.copyOf(patients);
+        }
+    }
+
+    /**
+     * Discovery search on the <strong>whole</strong> configured FHIR server (not restricted to MediCore's registry),
+     * by exact personnummer or name parts, to find existing Patients to import. Read-only: {@code POST
+     * [base]/Patient/_search} with a form body, so names and personnummer never appear in URLs.
+     *
+     * <p>Bounded: {@value #DISCOVERY_PAGE_SIZE} per page, at most {@value #DISCOVERY_MAX_PAGES} pages and
+     * {@value #DISCOVERY_MAX_RESULTS} Patients; beyond that the result is marked truncated instead of failing. Every
+     * entry must be a Patient with a valid logical ID, appear once and be a search match, and next links must stay on
+     * the configured FHIR base; otherwise the whole search fails ({@code INVALID_RESPONSE}). For a personnummer search
+     * only Patients with exactly that personnummer are returned.
+     */
+    public Discovery discoverPatients(PatientSearchCriteria criteria) {
+        if (criteria == null) throw new IllegalArgumentException("Valid search criteria are required");
+        return requestExecutor.execute("patient-discovery", () -> {
+            IQuery<IBaseBundle> query = fhirClient.search().forResource(Patient.class);
+            if (criteria.isPersonnummerSearch()) {
+                query = query.where(personnummerCriterion(criteria.personnummer()));
+            } else {
+                for (String part : criteria.nameParts()) query = query.where(Patient.NAME.matches().value(part));
+            }
+            String base = fhirClient.getServerBase();
+            URI current = URI.create(base + "/Patient/_search");
+            Set<URI> visited = new HashSet<>();
+            Set<String> seen = new HashSet<>();
+            List<Patient> results = new ArrayList<>();
+            Bundle bundle = query.count(DISCOVERY_PAGE_SIZE).usingStyle(SearchStyleEnum.POST)
+                    .returnBundle(Bundle.class).execute();
+            for (int page = 1; ; page++) {
+                if (bundle == null || bundle.getType() != Bundle.BundleType.SEARCHSET) throw invalidSearch();
+                for (var entry : bundle.getEntry()) {
+                    if (!(entry.getResource() instanceof Patient patient)
+                            || entry.hasSearch() && entry.getSearch().hasMode()
+                                && entry.getSearch().getMode() != Bundle.SearchEntryMode.MATCH) {
+                        throw invalidSearch();
+                    }
+                    String id = patient.getIdElement().getIdPart();
+                    if (id == null || !id.matches(LOGICAL_ID) || !seen.add(id)) throw invalidSearch();
+                    if (criteria.isPersonnummerSearch() && !hasPersonnummer(patient, criteria.personnummer())) continue;
+                    if (results.size() == DISCOVERY_MAX_RESULTS) return new Discovery(results, true);
+                    results.add(patient);
+                }
+                var links = bundle.getLink().stream().filter(link -> "next".equals(link.getRelation())).toList();
+                if (links.isEmpty()) return new Discovery(results, false);
+                if (links.size() != 1 || !links.getFirst().hasUrl()) throw invalidSearch();
+                if (page == DISCOVERY_MAX_PAGES) return new Discovery(results, true);
+                URI next = nextUri(current, links.getFirst().getUrl(), URI.create(base));
+                if (!visited.add(next)) throw invalidSearch();
+                current = next;
+                bundle = fhirClient.loadPage().byUrl(next.toString()).andReturnBundle(Bundle.class).execute();
+            }
+        });
+    }
+
     private void searchBatch(PatientSearchCriteria criteria, List<String> batch, List<Patient> results, Set<String> seen) {
         IQuery<IBaseBundle> query = fhirClient.search().forResource(Patient.class)
                 .where(IAnyResource.RES_ID.exactly().codes(batch));
         if (criteria.isPersonnummerSearch()) {
-            query = query.and(Patient.IDENTIFIER.exactly().systemAndIdentifier(Personnummer.SYSTEM, criteria.personnummer()));
+            query = query.and(personnummerCriterion(criteria.personnummer()));
         } else {
             for (String part : criteria.nameParts()) {
                 query = query.and(Patient.NAME.matches().value(part));
@@ -116,9 +183,20 @@ public class FhirPatientClient {
         }
     }
 
+    /**
+     * {@code identifier=system|YYYYMMDDXXXX,system|YYYYMMDD-XXXX} (FHIR token search, OR): a Patient may store the
+     * personnummer in either form (MediCore writes 12 digits, the KTH server uses a hyphen). Same system only.
+     */
+    private static ca.uhn.fhir.rest.gclient.ICriterion<?> personnummerCriterion(String personnummer) {
+        return Patient.IDENTIFIER.exactly().systemAndValues(Personnummer.SYSTEM,
+                Personnummer.identifierValues(personnummer));
+    }
+
+    /** True if a personnummer identifier (MediCore's system only) has this canonical value in a supported form. */
     private static boolean hasPersonnummer(Patient patient, String personnummer) {
         return patient.getIdentifier().stream().anyMatch(identifier ->
-                Personnummer.SYSTEM.equals(identifier.getSystem()) && personnummer.equals(identifier.getValue()));
+                Personnummer.SYSTEM.equals(identifier.getSystem())
+                        && personnummer.equals(Personnummer.canonical(identifier.getValue())));
     }
 
     /** A next link resolved against the current page; it must stay on the configured FHIR base. */

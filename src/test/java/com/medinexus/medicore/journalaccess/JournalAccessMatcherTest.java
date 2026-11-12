@@ -56,10 +56,47 @@ class JournalAccessMatcherTest {
         return user;
     }
 
+    /** A Patient as the personnummer search returns it: with the searched personnummer identifier. */
     private static Patient patient(String id) {
+        return patient(id, PERSONNUMMER);
+    }
+
+    private static Patient patient(String id, String... personnummer) {
         Patient patient = new Patient();
         patient.setId(id);
+        for (String value : personnummer) {
+            patient.addIdentifier().setSystem("http://electronichealth.se/identifier/personnummer").setValue(value);
+        }
         return patient;
+    }
+
+    // ---- Equivalent formatting and conflicting identifiers ----
+
+    @Test
+    void aRecordStoredAsYyyymmddDashXxxxMatchesTheTwelveDigitAccount() {
+        User account = account(7L, Role.PATIENT, PERSONNUMMER);
+        when(registry.registeredIds()).thenReturn(List.of("fhir-1"));
+        String formatted = PERSONNUMMER.substring(0, 8) + "-" + PERSONNUMMER.substring(8);
+        when(patients.searchPatients(any(), any())).thenReturn(List.of(patient("fhir-1", formatted)));
+        assertThat(matcher.findRegisteredPatient(account))
+                .isEqualTo(new JournalAccessMatcher.Match(MatchKind.FOUND, "fhir-1"));
+        // Both forms of the same personnummer on one record are still one person.
+        when(patients.searchPatients(any(), any())).thenReturn(List.of(patient("fhir-1", formatted, PERSONNUMMER)));
+        assertThat(matcher.findRegisteredPatient(account).kind()).isEqualTo(MatchKind.FOUND);
+    }
+
+    @Test
+    void aRecordWithConflictingPersonnummerIsNeverMatchedAutomatically() {
+        User account = account(7L, Role.PATIENT, PERSONNUMMER);
+        when(users.findById(7L)).thenReturn(Optional.of(account));
+        awaiting(30L, 7L);
+        when(registry.registeredIds()).thenReturn(List.of("fhir-1"));
+        for (String other : new String[] {"182511044568", "18251104-4568", "20041320-1971"}) {
+            when(patients.searchPatients(any(), any())).thenReturn(List.of(patient("fhir-1", PERSONNUMMER, other)));
+            assertThat(matcher.findRegisteredPatient(account).kind()).as(other).isEqualTo(MatchKind.AMBIGUOUS);
+            assertThat(matcher.resolveAwaiting(7L)).isFalse();
+        }
+        verify(requests, never()).attachRecordIfAwaiting(anyLong(), anyString());
     }
 
     private JournalAccessRequest awaiting(long requestId, long accountId) {

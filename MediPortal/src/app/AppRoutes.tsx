@@ -13,6 +13,7 @@ import StaffPage from '../features/staff/StaffPage.tsx'
 import ProtectedRoute from '../features/auth/ProtectedRoute.tsx'
 import PatientProfilePage from '../features/patientmanagement/PatientProfilePage.tsx'
 import PatientRegistrationForm from '../features/patientmanagement/PatientRegistrationForm.tsx'
+import ImportPatientPage from '../features/patientmanagement/ImportPatientPage.tsx'
 import JournalAccessRequestsPage from '../features/journalaccess/JournalAccessRequestsPage.tsx'
 import JournalAccessReviewPage from '../features/journalaccess/JournalAccessReviewPage.tsx'
 import MyMedicalRecordPage from '../features/medicalrecord/MyMedicalRecordPage.tsx'
@@ -45,6 +46,7 @@ function AppRoutes() {
         </Route>
         <Route element={<ProtectedRoute roles={['DOCTOR', 'STAFF']} />}>
           <Route path="patients/new" element={<PatientRegistrationForm />} />
+          <Route path="patients/import" element={<ImportPatientPage />} />
           <Route path="patients/:id" element={<PatientProfilePage />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />

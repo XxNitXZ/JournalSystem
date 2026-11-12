@@ -118,9 +118,34 @@ class FhirPatientSearchTest {
             assertThat(client.searchPatients(PatientSearchCriteria.parse("197303159250"), OWN)).isEmpty();
         });
         assertThat(localFhir.requests()).allMatch(request -> request.equals("POST /fhir/Patient/_search"));
-        assertThat(localFhir.searchForms().getFirst().get("identifier")).containsExactly(SYSTEM + "|" + PERSONNUMMER);
+        // Both stored forms of the same personnummer, in MediCore's identifier system only (FHIR token OR).
+        assertThat(localFhir.searchForms().getFirst().get("identifier"))
+                .containsExactly(SYSTEM + "|" + PERSONNUMMER + "," + SYSTEM + "|19900101-2385");
         assertThat(String.join(" ", localFhir.requests()).contains(PERSONNUMMER)).as("personnummer in a URL").isFalse();
         assertThat(output.getAll().contains(PERSONNUMMER)).as("log contains the personnummer").isFalse();
+    }
+
+    /** The KTH server stores personnummer as YYYYMMDD-XXXX: such a Patient is found by the 12-digit value. */
+    @Test
+    void aPersonnummerStoredWithAHyphenIsFoundButOtherSystemsAndDigitsAreNot() throws IOException {
+        localFhir = LocalFhirServer.start();
+        localFhir.seed(patient("kth-formatted", "Anna", "Testsson", "19900101-2385"));
+        Patient otherSystem = patient("other-system", "Anna", "Testsson", PERSONNUMMER);
+        otherSystem.getIdentifierFirstRep().setSystem("http://hospital.example/mrn");
+        localFhir.seed(otherSystem);
+        // Not a personnummer form: another separator position.
+        localFhir.seed(patient("bad-separator", "Anna", "Testsson", "1990010-12385"));
+        List<String> known = List.of("kth-formatted", "other-system", "bad-separator");
+        context(localFhir.baseUrl()).run(ctx -> {
+            FhirPatientClient client = ctx.getBean(FhirPatientClient.class);
+            assertThat(ids(client.searchPatients(PatientSearchCriteria.parse(PERSONNUMMER), known)))
+                    .containsExactly("kth-formatted");
+            assertThat(ids(client.discoverPatients(PatientSearchCriteria.parse("19900101-2385")).patients()))
+                    .containsExactly("kth-formatted");
+        });
+        // The stored identifier is never rewritten.
+        assertThat(((Patient) localFhir.stored("Patient", "kth-formatted")).getIdentifierFirstRep().getValue())
+                .isEqualTo("19900101-2385");
     }
 
     @Test

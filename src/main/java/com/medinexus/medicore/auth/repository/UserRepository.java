@@ -72,4 +72,26 @@ public interface UserRepository extends JpaRepository<User, Long> {
             """)
     int assignPractitionerIfUnlinked(@Param("accountId") Long accountId,
             @Param("expectedRole") Role expectedRole, @Param("fhirId") String fhirId);
+
+    /**
+     * The FHIR Practitioner IDs linked to DOCTOR and STAFF accounts (operator command): the Practitioners that belong
+     * to MediCore and can be chosen for an Encounter (US-05.05).
+     */
+    @Query("""
+            SELECT DISTINCT u.fhirPractitionerId FROM User u
+            WHERE u.fhirPractitionerId IS NOT NULL
+              AND u.role IN (com.medinexus.medicore.auth.entity.Role.DOCTOR,
+                             com.medinexus.medicore.auth.entity.Role.STAFF)
+            ORDER BY u.fhirPractitionerId
+            """)
+    List<String> findClinicianPractitionerIds();
+
+    /** True if this Practitioner is linked to a DOCTOR or STAFF account. */
+    @Query("""
+            SELECT COUNT(u) > 0 FROM User u
+            WHERE u.fhirPractitionerId = :fhirId
+              AND u.role IN (com.medinexus.medicore.auth.entity.Role.DOCTOR,
+                             com.medinexus.medicore.auth.entity.Role.STAFF)
+            """)
+    boolean isClinicianPractitioner(@Param("fhirId") String fhirId);
 }

@@ -94,8 +94,26 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/patients").hasAnyRole("DOCTOR", "STAFF")
                         // Search among MediCore's own Patients; the query is in the body, never in the URL.
                         .requestMatchers(HttpMethod.POST, "/api/patients/search").hasAnyRole("DOCTOR", "STAFF")
+                        // Import of existing FHIR Patients: discovery search on the FHIR server and registry entry.
+                        .requestMatchers(HttpMethod.POST, "/api/patients/import", "/api/patients/import/search")
+                                .hasAnyRole("DOCTOR", "STAFF")
                         // The PATIENT's own record; must come before the DOCTOR/STAFF rule for /api/patients/*.
                         .requestMatchers(HttpMethod.GET, "/api/patients/me").hasRole("PATIENT")
+                        // Encounters (US-05.05): the PATIENT's own (before the rule below); DOCTOR/STAFF per Patient.
+                        .requestMatchers(HttpMethod.GET, "/api/patients/me/encounters").hasRole("PATIENT")
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/encounters").hasAnyRole("DOCTOR", "STAFF")
+                        .requestMatchers(HttpMethod.POST, "/api/patients/*/encounters").hasAnyRole("DOCTOR", "STAFF")
+                        // Clinical notes (US-05.01): the PATIENT's own (before the rule below); DOCTOR/STAFF per
+                        // Patient. Creating additionally requires a linked Practitioner (ClinicalNoteService).
+                        .requestMatchers(HttpMethod.GET, "/api/patients/me/notes").hasRole("PATIENT")
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/notes").hasAnyRole("DOCTOR", "STAFF")
+                        .requestMatchers(HttpMethod.POST, "/api/patients/*/notes").hasAnyRole("DOCTOR", "STAFF")
+                        // Diagnoses (US-05.02): the PATIENT's own (before the rule below); DOCTOR/STAFF per Patient.
+                        // Recording additionally requires a linked Practitioner (DiagnosisService).
+                        .requestMatchers(HttpMethod.GET, "/api/patients/me/conditions").hasRole("PATIENT")
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/conditions").hasAnyRole("DOCTOR", "STAFF")
+                        .requestMatchers(HttpMethod.POST, "/api/patients/*/conditions").hasAnyRole("DOCTOR", "STAFF")
+                        .requestMatchers(HttpMethod.GET, "/api/practitioners").hasAnyRole("DOCTOR", "STAFF")
                         // Journal access: PATIENT status and own request; DOCTOR review (list, count, details,
                         // decisions).
                         .requestMatchers(HttpMethod.GET, "/api/journal-access/me").hasRole("PATIENT")

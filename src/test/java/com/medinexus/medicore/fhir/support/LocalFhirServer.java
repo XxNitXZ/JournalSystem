@@ -166,7 +166,7 @@ public final class LocalFhirServer implements AutoCloseable {
     /**
      * Form-encoded search: {@code _id} (comma-separated IDs), repeated {@code name} (each must match the start of
      * a family name, given name or name text, ignoring case and accents; all must match), {@code identifier}
-     * ({@code system|value}, exact) and {@code _count} (default 100). Any other parameter gives 400. Results are
+     * ({@code system|value}, exact; several comma-separated are OR) and {@code _count} (default 100). Any other parameter gives 400. Results are
      * in creation order; further pages are linked as {@code [base]?_getpages=...&_getpagesoffset=...}, as HAPI does.
      */
     private void formSearch(HttpExchange exchange, String type) throws IOException {
@@ -190,7 +190,10 @@ public final class LocalFhirServer implements AutoCloseable {
         List<String> idFilter = form.containsKey("_id")
                 ? form.get("_id").stream().flatMap(value -> Arrays.stream(value.split(","))).toList() : null;
         List<String> names = form.getOrDefault("name", List.of()).stream().map(LocalFhirServer::normalize).toList();
-        String[] identifier = form.containsKey("identifier") ? form.get("identifier").getFirst().split("\\|", 2) : null;
+        // identifier=system|value, or several comma-separated (FHIR token OR), each matched exactly.
+        List<String[]> identifiers = form.containsKey("identifier")
+                ? Arrays.stream(form.get("identifier").getFirst().split(",")).map(token -> token.split("\\|", 2)).toList()
+                : null;
         int count = form.containsKey("_count") ? Integer.parseInt(form.get("_count").getFirst()) : 100;
         List<Resource> matches = new ArrayList<>();
         synchronized (this) {
@@ -198,7 +201,8 @@ public final class LocalFhirServer implements AutoCloseable {
                 String id = key.substring(key.indexOf('/') + 1);
                 if (key.startsWith(type + "/") && (idFilter == null || idFilter.contains(id))
                         && names.stream().allMatch(name -> nameMatches(resource, name))
-                        && (identifier == null || hasIdentifier(resource, identifier[0], identifier[1]))) {
+                        && (identifiers == null || identifiers.stream().anyMatch(token -> token.length == 2
+                                && hasIdentifier(resource, token[0], token[1])))) {
                     matches.add(resource.copy());
                 }
             });
