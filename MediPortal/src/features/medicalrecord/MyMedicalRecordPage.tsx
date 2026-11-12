@@ -8,6 +8,12 @@ import { ownRecordErrorMessage } from '../journalaccess/journalAccessText.ts'
 import PatientProfileView from '../patientmanagement/PatientProfileView.tsx'
 import { getOwnPatientRecord } from '../patientmanagement/patientService.ts'
 import type { PatientProfileDto } from '../patientmanagement/types.ts'
+import ClinicalNotesSection from './ClinicalNotesSection.tsx'
+import { listOwnNotes } from './clinicalNoteService.ts'
+import DiagnosesSection from './DiagnosesSection.tsx'
+import { listOwnDiagnoses } from './diagnosisService.ts'
+import EncountersSection from './EncountersSection.tsx'
+import { listOwnEncounters } from './encounterService.ts'
 
 type RecordState = { status: 'loading' } | { status: 'failed'; message: string } | { status: 'loaded'; record: PatientProfileDto }
 
@@ -31,10 +37,17 @@ function MyMedicalRecordPage() {
   return (
     <section className="page" aria-labelledby="my-record-title">
       <PageHeader titleId="my-record-title" eyebrow="Patient" title="My Medical Record" icon={FileHeart}
-        description="Your personal details as recorded by your care provider." />
+        description="Your personal details, visits, diagnoses and clinical notes as recorded by your care provider." />
       {state.status === 'loading' && <div className="card"><LoadingState label="Loading your medical record…" /></div>}
       {state.status === 'failed' && <Alert tone="error" role="alert">{state.message}</Alert>}
-      {state.status === 'loaded' && <PatientProfileView patient={state.record} label="Your medical record" />}
+      {state.status === 'loaded' && (
+        <>
+          <PatientProfileView patient={state.record} label="Your medical record" />
+          <EncountersSection load={listOwnEncounters} emptyText="No visits have been recorded yet." />
+          <DiagnosesSection load={listOwnDiagnoses} />
+          <ClinicalNotesSection load={listOwnNotes} emptyText="No clinical notes have been recorded yet." />
+        </>
+      )}
       <p><Link to="/patient" className="text-link"><ArrowLeft size={18} aria-hidden="true" />Back to dashboard</Link></p>
     </section>
   )

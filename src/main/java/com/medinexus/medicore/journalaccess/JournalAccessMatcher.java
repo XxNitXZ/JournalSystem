@@ -13,6 +13,7 @@ import com.medinexus.medicore.auth.repository.UserRepository;
 import com.medinexus.medicore.fhir.client.FhirPatientClient;
 import com.medinexus.medicore.patient.dto.PatientSearchCriteria;
 import com.medinexus.medicore.patient.registry.PatientRegistry;
+import com.medinexus.medicore.patient.validation.PatientPersonnummer;
 
 /**
  * Matching of PATIENT accounts and Patients registered by MediCore, by normalized personnummer only (never by
@@ -83,6 +84,21 @@ public class JournalAccessMatcher {
     }
 
     /**
+     * An existing FHIR Patient with this (valid) personnummer was just imported into MediCore's registry. If the
+     * unlinked PATIENT account with the same personnummer has a request AWAITING_RECORD, it is matched again with
+     * {@link #resolveAwaiting}: it becomes PENDING only if exactly one registered Patient that is free has that
+     * personnummer (several, or one linked to another account, leave it awaiting). Never creates a request, never
+     * links an account and never matches by name. Without a waiting request no FHIR request is made.
+     *
+     * @return true if a waiting request became PENDING
+     */
+    public boolean onPatientImported(String personnummer) {
+        if (personnummer == null) return false;
+        return users.findByPersonnummer(personnummer).filter(JournalAccessMatcher::isUnlinkedPatient)
+                .map(account -> resolveAwaiting(account.getId())).orElse(false);
+    }
+
+    /**
      * Retries matching for the account's request AWAITING_RECORD, if it has one. Without such a request this does
      * nothing and makes no FHIR request. FHIR failures are thrown to the caller; the request then stays awaiting.
      *
@@ -110,9 +126,17 @@ public class JournalAccessMatcher {
         if (account == null || account.getPersonnummer() == null) return Match.of(MatchKind.NONE);
         List<String> registered = registry.registeredIds();
         if (registered.isEmpty()) return Match.of(MatchKind.NONE);
-        List<String> found = patients.searchPatients(PatientSearchCriteria.parse(account.getPersonnummer()), registered)
-                .stream().map(patient -> patient.getIdElement().getIdPart()).distinct().toList();
-        if (found.isEmpty()) return Match.of(MatchKind.NONE);
+        List<org.hl7.fhir.r4.model.Patient> records = patients.searchPatients(
+                PatientSearchCriteria.parse(account.getPersonnummer()), registered);
+        if (records.isEmpty()) return Match.of(MatchKind.NONE);
+        // The personnummer may be stored as YYYYMMDDXXXX or YYYYMMDD-XXXX; a record whose personnummer identifiers
+        // name different persons (or include an invalid one) is never matched automatically.
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Europe/Stockholm"));
+        if (records.stream().anyMatch(patient ->
+                !PatientPersonnummer.of(patient, today).matches(account.getPersonnummer()))) {
+            return Match.of(MatchKind.AMBIGUOUS);
+        }
+        List<String> found = records.stream().map(patient -> patient.getIdElement().getIdPart()).distinct().toList();
         List<String> free = found.stream()
                 .filter(id -> users.findByFhirPatientId(id).map(owner -> owner.getId().equals(account.getId())).orElse(true))
                 .toList();

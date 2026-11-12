@@ -29,11 +29,32 @@ public final class Personnummer {
      * ({@code today}). Nothing else is changed. Never includes the value in any message.
      */
     public static String normalize(String value, LocalDate today) {
+        String canonical = canonical(value);
+        if (canonical == null || dateOf(canonical).isAfter(today)) return null;
+        return canonical;
+    }
+
+    /**
+     * The canonical 12-digit form of exactly {@code YYYYMMDDXXXX} or {@code YYYYMMDD-XXXX} (the hyphen only between
+     * date and the last four digits; surrounding whitespace ignored) with a real calendar date, otherwise null. No
+     * other character is removed, and the future-date rule is left to the callers ({@link #normalize} applies it).
+     */
+    public static String canonical(String value) {
         if (value == null) return null;
         String stripped = value.strip();
-        if (stripped.matches("[0-9]{8}-[0-9]{4}")) stripped = stripped.replace("-", "");
-        if (!isValid(stripped) || dateOf(stripped).isAfter(today)) return null;
-        return stripped;
+        if (stripped.matches("[0-9]{8}-[0-9]{4}")) stripped = stripped.substring(0, 8) + stripped.substring(9);
+        return isValid(stripped) ? stripped : null;
+    }
+
+    /**
+     * The identifier values under which a Patient with this canonical personnummer may be stored in FHIR: the
+     * 12-digit form (as MediCore writes it) and {@code YYYYMMDD-XXXX} (as on the KTH server). For exact token searches.
+     *
+     * @throws IllegalArgumentException if the value is not a valid canonical personnummer
+     */
+    public static java.util.List<String> identifierValues(String canonical) {
+        if (!isValid(canonical)) throw new IllegalArgumentException("A valid Swedish personnummer is required");
+        return java.util.List.of(canonical, canonical.substring(0, 8) + "-" + canonical.substring(8));
     }
 
     /** True for exactly twelve ASCII digits whose first eight form a real calendar date. No check-digit test. */

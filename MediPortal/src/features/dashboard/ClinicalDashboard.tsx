@@ -1,4 +1,4 @@
-import { ClipboardCheck, Inbox, FolderSearch, Stethoscope, UserPlus, Users, type LucideIcon } from 'lucide-react'
+import { ClipboardCheck, Download, Inbox, FolderSearch, Stethoscope, UserPlus, Users, type LucideIcon } from 'lucide-react'
 import ActionCard from '../../components/ui/ActionCard.tsx'
 import Alert from '../../components/ui/Alert.tsx'
 import Card from '../../components/ui/Card.tsx'
@@ -46,6 +46,8 @@ function ClinicalDashboard({ role }: ClinicalDashboardProps) {
 
       <div className="card-grid">
         <ActionCard to="/patients/new" title="Register a patient" description={text.register} icon={UserPlus} />
+        <ActionCard to="/patients/import" title="Import an existing patient" icon={Download}
+          description="Add a patient who already exists on the patient records server, without creating a new record." />
         <ActionCard to={`/${role}/inbox`} title="Patient inbox" description="Read messages from your patients." icon={Inbox} />
         {role === 'doctor' && (
           <ActionCard to="/doctor/journal-requests" title="Journal access requests" icon={ClipboardCheck}

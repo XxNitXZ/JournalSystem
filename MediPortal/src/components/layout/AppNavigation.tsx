@@ -1,4 +1,4 @@
-import { ClipboardCheck, Send, LayoutDashboard, UserPlus, UserRound, type LucideIcon, MessagesSquare } from 'lucide-react'
+import { ClipboardCheck, Download, Send, LayoutDashboard, UserPlus, UserRound, type LucideIcon, MessagesSquare } from 'lucide-react'
 import { NavLink } from 'react-router'
 import CountBadge from '../ui/CountBadge.tsx'
 import { useAuth } from '../../features/auth/AuthContext.ts'
@@ -25,10 +25,11 @@ function itemsFor(role: Role): NavItem[] {
   { to: '/patient/messages/new', label: 'Send a message', icon: Send }, account
   ]
   const register: NavItem = { to: '/patients/new', label: 'Register patient', icon: UserPlus }
+  const importExisting: NavItem = { to: '/patients/import', label: 'Import patient', icon: Download }
   const inbox: NavItem = { to: `/${role.toLowerCase()}/inbox`, label: 'Patient inbox', icon: MessagesSquare }
-  if (role === 'STAFF') return [dashboard, register, inbox, account]
+  if (role === 'STAFF') return [dashboard, register, importExisting, inbox, account]
   const requests: NavItem = { to: '/doctor/journal-requests', label: 'Journal requests', icon: ClipboardCheck, pendingCount: true }
-  return [dashboard, register, inbox, requests, account]
+  return [dashboard, register, importExisting, inbox, requests, account]
 }
 
 const pendingLabel = (count: number) => `, ${count} awaiting review`

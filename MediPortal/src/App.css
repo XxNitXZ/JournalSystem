@@ -1346,3 +1346,198 @@ fieldset:disabled .btn {
 @media (max-width: 760px) {
   .conversation-layout { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- Encounters (US-05.05) ---------- */
+
+.card__actions--top {
+  margin-top: 0;
+  margin-bottom: var(--space-4);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.data-table th,
+.data-table td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.data-table th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.data-table__date {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.encounter-form {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-muted);
+}
+
+.encounter-form h3 {
+  margin: 0 0 var(--space-3);
+}
+
+/* ---------- Import existing patient ---------- */
+
+.import-results {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.import-results__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.import-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-muted);
+}
+
+.import-card__identity {
+  flex: 1;
+  min-width: 0;
+}
+
+.import-card__name {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.import-card__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.import-card__details > div {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.import-card__details dt {
+  font-weight: 600;
+}
+
+.import-card__details dt::after {
+  content: ":";
+}
+
+.import-card__details dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.import-card__note {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.import-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+/* ---------- Clinical notes (US-05.01) ---------- */
+
+.note-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.note-card {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-muted);
+}
+
+.note-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  font-weight: 600;
+}
+
+.note-card__date {
+  font-variant-numeric: tabular-nums;
+}
+
+.note-card__visit {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Plain text with its line breaks; never interpreted as HTML or Markdown. */
+.note-card__text {
+  margin: var(--space-3) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-card__text--unavailable {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ---------- Diagnoses (US-05.02) ---------- */
+
+.diagnosis-card__name {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.field__error {
+  margin: var(--space-1) 0 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}

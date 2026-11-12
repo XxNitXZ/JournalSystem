@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, ClipboardList, Pencil } from 'lucide-react'
 import { Link, useParams } from 'react-router'
 import Alert from '../../components/ui/Alert.tsx'
@@ -14,6 +14,13 @@ import { patientProfileErrorMessage } from './patientProfileErrorMessage.ts'
 import { getPatient } from './patientService.ts'
 import { canEditPatients } from './patientUpdate.ts'
 import type { PatientProfileDto } from './types.ts'
+import ClinicalNotesSection from '../medicalrecord/ClinicalNotesSection.tsx'
+import { listPatientNotes } from '../medicalrecord/clinicalNoteService.ts'
+import DiagnosesSection from '../medicalrecord/DiagnosesSection.tsx'
+import { listPatientDiagnoses } from '../medicalrecord/diagnosisService.ts'
+import EncountersSection from '../medicalrecord/EncountersSection.tsx'
+import { listPatientEncounters } from '../medicalrecord/encounterService.ts'
+import type { ApiRequestOptions } from '../../services/apiClient.ts'
 
 type ProfileState = { status: 'loading' } | { status: 'failed'; message: string } | { status: 'loaded'; patient: PatientProfileDto }
 
@@ -43,6 +50,9 @@ function PatientProfile({ id }: { id: string }) {
   const [reload, setReload] = useState(0)
   const [editing, setEditing] = useState(false)
   const [success, setSuccess] = useState('')
+  const loadEncounters = useCallback((options: ApiRequestOptions) => listPatientEncounters(id, options), [id])
+  const loadNotes = useCallback((options: ApiRequestOptions) => listPatientNotes(id, options), [id])
+  const loadDiagnoses = useCallback((options: ApiRequestOptions) => listPatientDiagnoses(id, options), [id])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -74,6 +84,9 @@ function PatientProfile({ id }: { id: string }) {
             onEdit={() => { setSuccess(''); setEditing(true) }} />
         )}
       <Alert tone="success" role="status">{success}</Alert>
+      <EncountersSection load={loadEncounters} createFor={canEditPatients(user?.role) ? id : undefined} />
+      <DiagnosesSection load={loadDiagnoses} createFor={canEditPatients(user?.role) ? id : undefined} />
+      <ClinicalNotesSection load={loadNotes} createFor={canEditPatients(user?.role) ? id : undefined} />
     </>
   )
 }

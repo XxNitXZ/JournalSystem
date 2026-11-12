@@ -144,13 +144,31 @@ class FhirConditionCreateTest {
         assertThat(payloads.getFirst().getAbatementDateTimeType().getValueAsString()).isEqualTo(date);
     }
 
+    /** US-05.02: an uncoded diagnosis is stored as text only, with recorded date, Encounter and recorder references. */
+    @Test
+    void createsTextOnlyDiagnosisWithRecordedDateEncounterAndRecorder() {
+        context().run(ctx -> {
+            var input = new CreateConditionRequest("synthetic-patient", new Concept("Fiktiv diagnos", List.of()),
+                    ClinicalStatus.ACTIVE, VerificationStatus.CONFIRMED, List.of(), null, "2026-11-01", null,
+                    "2026-11-12T09:30:00Z", "enc-1", "pract-1");
+            assertThat(ctx.getBean(FhirConditionClient.class).createCondition(input)).isEqualTo("server-123");
+            var resource = payloads.getFirst();
+            assertThat(resource.getCode().getText()).isEqualTo("Fiktiv diagnos");
+            assertThat(resource.getCode().hasCoding()).isFalse();
+            assertThat(resource.getRecordedDateElement().getValueAsString()).isEqualTo("2026-11-12T09:30:00Z");
+            assertThat(resource.getEncounter().getReference()).isEqualTo("Encounter/enc-1");
+            assertThat(resource.getRecorder().getReference()).isEqualTo("Practitioner/pract-1");
+        });
+    }
+
     @Test
     void invalidInputsAndStatusConstraintsCauseZeroRequests() {
         List<CreateConditionRequest> invalid = new ArrayList<>();
         invalid.add(null);
         for (String id : new String[] {null, "", " ", "Patient/1", "https://example.test/1", "id_name", "x".repeat(65)})
             invalid.add(new CreateConditionRequest(id, diagnosis(), null, null, null, null, null, null));
-        for (Concept code : new Concept[] {null, new Concept("Text only", List.of()),
+        // Since US-05.02 a text-only code is valid (Condition.code.text); a code without text and coding is not.
+        for (Concept code : new Concept[] {null, new Concept(" ", List.of()),
                 new Concept(null, List.of(new Coding(null, null, "test", null, null))),
                 new Concept(null, List.of(new Coding("bad uri", null, "test", null, null))),
                 new Concept(null, List.of(new Coding("urn:synthetic", null, " ", null, null)))})
@@ -161,6 +179,11 @@ class FhirConditionCreateTest {
                 invalid.add(request(clinical, null, null, "2026"));
         }
         invalid.add(request(null, null, null, "2026"));
+        for (String[] ids : new String[][] {{"Encounter/1", null}, {"bad_id", null}, {null, "Practitioner/1"},
+                {null, "http://x.test/p"}}) {
+            invalid.add(new CreateConditionRequest("p1", diagnosis(), null, null, null, null, null, null, null, ids[0], ids[1]));
+        }
+        invalid.add(new CreateConditionRequest("p1", diagnosis(), null, null, null, null, null, null, "2026-13-01", null, null));
         invalid.add(request(null, VerificationStatus.ENTERED_IN_ERROR, null, "2026"));
         var problemList = new Concept(null, List.of(new Coding("http://terminology.hl7.org/CodeSystem/condition-category",
                 null, "problem-list-item", null, null)));

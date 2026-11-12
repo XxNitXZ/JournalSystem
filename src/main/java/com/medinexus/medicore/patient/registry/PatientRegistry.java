@@ -43,6 +43,22 @@ public class PatientRegistry {
         }
     }
 
+    /**
+     * Records an existing Patient imported from the FHIR server (only its logical ID, the importing account and the
+     * time). Returns true if this call registered it, false if it was already registered, also when another request
+     * registered it concurrently.
+     */
+    @Transactional
+    public boolean recordImport(String fhirPatientId, Long importedBy) {
+        return registered.insertIfAbsent(fhirPatientId, importedBy, Instant.now(clock)) == 1;
+    }
+
+    /** True if the Patient has a row in {@code registered_patients} (registered or imported by MediCore). */
+    @Transactional(readOnly = true)
+    public boolean isRegistered(String fhirPatientId) {
+        return registered.existsById(fhirPatientId);
+    }
+
     /** True if the Patient was registered by MediCore or is linked to a MediCore account. */
     @Transactional(readOnly = true)
     public boolean isKnown(String fhirPatientId) {

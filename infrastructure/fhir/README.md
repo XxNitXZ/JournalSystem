@@ -32,8 +32,9 @@ holds only accounts and FHIR ID references (see
 | Patient | `FhirPatientClient` | `readPatient(id)`: `GET [base]/Patient/{id}`; `createPatient(CreatePatientRequest)`: conditional `POST [base]/Patient` (see [Patient registration](#patient-registration-us-0401)); `searchPatients(PatientSearchCriteria, knownIds)`: `POST [base]/Patient/_search` restricted by `_id` (see [Patient search](#patient-search-and-the-patient-registry)) | `PatientMapper` ↔ `patient/dto/PatientDto`, `CreatePatientRequest` |
 | Practitioner | `FhirPractitionerClient` | `readPractitioner(id)`: `GET [base]/Practitioner/{id}` | `PractitionerMapper` → `practitioner/dto/PractitionerDto` |
 | Observation | `FhirObservationClient` | `readObservation(id)`, `createObservation(CreateObservationRequest)`, `findByPatientId(patientId)` | `ObservationMapper` ↔ `medicalrecord/dto/ObservationDto`, `CreateObservationRequest` |
-| Condition | `FhirConditionClient` | `readCondition(id)`, `createCondition(CreateConditionRequest)`, `findByPatientId(patientId)` | `ConditionMapper` ↔ `medicalrecord/dto/ConditionDto`, `CreateConditionRequest` |
+| Condition | `FhirConditionClient` | `readCondition(id)`, `createCondition(CreateConditionRequest)`, `findByPatientId(patientId)` | `ConditionMapper` ↔ `medicalrecord/dto/ConditionDto`, `CreateConditionRequest` (since US-05.02 also `recordedDate`, `encounter`, `recorder`; see [Diagnoses](#diagnoses-us-0502)) |
 | Encounter | `FhirEncounterClient` | `readEncounter(id)`, `createEncounter(CreateEncounterRequest)`, `findByPatientId(patientId)` | `EncounterMapper` ↔ `medicalrecord/dto/EncounterDto`, `CreateEncounterRequest` (see [Encounter](#encounter)) |
+| DocumentReference | `FhirDocumentReferenceClient` | `createDocumentReference(DocumentReference)`: `POST [base]/DocumentReference`; `findByPatientId(patientId)`: `GET [base]/DocumentReference?subject=Patient/{id}` (see [Clinical notes](#clinical-notes-us-0501)) | `ClinicalNoteMapper` → `medicalrecord/dto/ClinicalNoteDto`; API: `CreateClinicalNoteRequest` |
 | Organization | `FhirOrganizationClient` | `readOrganization(id)`, `createOrganization(OrganizationWriteRequest)`, `updateOrganization(id, expectedVersionId, OrganizationWriteRequest)` | `OrganizationMapper` ↔ `organization/dto/OrganizationDto`, `OrganizationWriteRequest` (see [Organization](#organization)) |
 | Location | `FhirLocationClient` | `readLocation(id)`, `createLocation(LocationWriteRequest)`, `updateLocation(id, expectedVersionId, LocationWriteRequest)` | `LocationMapper` ↔ `location/dto/LocationDto`, `LocationWriteRequest` (see [Location](#location)) |
 
@@ -427,6 +428,252 @@ server, synthetic Patients only); `patient-read` is part of
   as Swedish patient data legislation (patientdatalagen) would require in
   production.
 
+### Encounter management (US-05.05)
+
+Clinicians document visits of registered Patients; patients read their own.
+Encounters are stored **only in HAPI FHIR**, through the Epic 3
+`FhirEncounterClient` and `EncounterMapper` (`EncounterService`,
+`EncounterController`); there is no Encounter table, entity or migration.
+
+| Endpoint | Roles | Purpose |
+|---|---|---|
+| `POST /api/patients/{id}/encounters` | DOCTOR, STAFF (CSRF) | create a visit for this Patient; 201 with the visit |
+| `GET /api/patients/{id}/encounters` | DOCTOR, STAFF | the Patient's visits, newest first |
+| `GET /api/patients/me/encounters` | PATIENT | the signed-in patient's own visits; no ID is accepted |
+| `GET /api/practitioners` | DOCTOR, STAFF | Practitioners that can be chosen, by name |
+
+**Patient association.** The Patient is always the one in the path (clinicians)
+or the account's approved link `users.fhir_patient_id` (PATIENT); a body that
+names a patient (or any other field than below) is rejected. The roles are
+checked in `SecurityConfig`, again from PostgreSQL, and with
+`PatientAccessService`. Only Patients known to MediCore (registry or account
+link) are read or written; others are 404 without a FHIR request. A PATIENT
+without an approved link gets 404 `RECORD_NOT_LINKED`; patients can never
+create Encounters or read another Patient's.
+
+**Practitioner association.** MediCore already links DOCTOR/STAFF accounts to
+FHIR Practitioners (`users.fhir_practitioner_id`, operator command). Only these
+Practitioners can be chosen (`PractitionerDirectory`); the clinician's own is
+preselected. No Practitioner is created, and no account ID is used as a
+Practitioner ID. A Practitioner that is not linked is 400
+`PRACTITIONER_NOT_AVAILABLE`; one that no longer exists in FHIR is 422
+`PRACTITIONER_NOT_FOUND`.
+
+**Body** (`NewEncounterRequest`): `startTime` (ISO 8601 **with** offset, e.g.
+`2026-11-10T14:30:00+01:00`; MediPortal sends the browser's offset; stored with
+second precision and that offset), `practitionerId`, `type` (`CONSULTATION`,
+`FOLLOW_UP`, `CHECK_UP`, `TELEPHONE`; SNOMED CT `Encounter.type` and the
+matching `Encounter.class` AMB or VR), optional `status` (`FINISHED` by
+default, `IN_PROGRESS`, `PLANNED`; a finished or ongoing visit cannot start
+more than five minutes in the future), optional `organizationId` and
+`locationId` (read from FHIR first; 422 if missing).
+
+**FHIR resource:** `subject = Patient/{id}`,
+`participant.individual = Practitioner/{id}` (type ATND), `period.start`,
+`status`, `class`, `type`, and `serviceProvider` / `location.location` only
+when given. Everything is validated before the single create; the Patient and
+Practitioner are read first. A failed create may still have been committed;
+there are no automatic retries.
+
+**Retrieval** uses `FhirEncounterClient.findByPatientId`: `subject=Patient/{id}`,
+at most 10 pages / 1,000 results, next links within the FHIR base, and every
+result must have exactly that subject, otherwise the whole search fails (502),
+so other Patients' visits on the shared server are never mixed in. The API
+returns readable summaries (`EncounterSummaryDto`: start, status, type,
+practitioner names, organization and location names; no references), newest
+first; names are read once per list (at most 25 per resource type).
+
+Errors: 400/422/404 with a `code`, 401/403, 404 unknown Patient, 503 FHIR
+timeout or unavailable, 502 invalid response. Logs contain account IDs and
+counts only.
+
+**Limitations:** Organization and Location are supported by the API and shown
+when present, but MediPortal does not offer them yet: MediCore has no registry of
+its own Organizations and Locations on the shared server, and selecting other
+users' resources there would not be appropriate. Practitioners must be linked to
+a clinician account with the operator command before visits can be documented;
+there is no self-service linking. Encounters cannot be edited or cancelled
+through MediCore yet.
+
+Tests: `EncounterServiceTest`, `EncounterControllerTest`,
+`PractitionerDirectoryTest`, `EncounterIntegrationTest` (PostgreSQL
+`medinexus_test`, local FHIR server) and the Epic 3 client tests
+(`FhirEncounterCreateTest`, `FhirEncounterSearchTest`).
+
+### Clinical notes (US-05.01)
+
+Clinicians write plain-text notes on a patient's visits; patients read their
+own. A note is stored **only in HAPI FHIR** as an R4 **DocumentReference**
+(`ClinicalNoteService`, `ClinicalNoteController`,
+`FhirDocumentReferenceClient`, `ClinicalNoteMapper`); there is no note table,
+entity or migration, and no note text in PostgreSQL or in logs.
+
+| Endpoint | Roles | Purpose |
+|---|---|---|
+| `POST /api/patients/{id}/notes` `{"encounterId","content"}` | DOCTOR, STAFF with a linked Practitioner (CSRF) | write a note on one of this Patient's visits; 201 with the note |
+| `GET /api/patients/{id}/notes` | DOCTOR, STAFF | the Patient's notes, newest first |
+| `GET /api/patients/me/notes` | PATIENT | the signed-in patient's own notes; no ID is accepted |
+
+**Why DocumentReference:** a clinical note is a document about the patient,
+not a measurement (Observation) or a problem or diagnosis (Condition).
+DocumentReference is FHIR's resource for clinical documents and is used for
+clinical notes, for example by US Core. The KTH server's CapabilityStatement
+declares DocumentReference with `create`, `read` and `search-type` and the
+search parameters `subject`, `patient` and `encounter` (checked read-only on
+2026-11-12, see [Observed server capabilities](#observed-server-capabilities)).
+
+**Resource written** (`ClinicalNoteMapper.toResource`, valid FHIR R4: checked
+in `ClinicalNoteMapperTest` with HAPI's offline R4 instance validator, a
+test-only dependency):
+
+| Element | Value |
+|---|---|
+| `status` | `current` |
+| `type` | LOINC `http://loinc.org` `11506-3` "Progress note", text "Clinical note" (a standard code, no local code system) |
+| `subject` | `Patient/{id}` from the URL path |
+| `context.encounter` | `Encounter/{encounterId}`: an existing Encounter whose subject is this Patient |
+| `author` | `Practitioner/{id}` from the signed-in clinician's `users.fhir_practitioner_id`, never from the request |
+| `date` | creation time (UTC, seconds) |
+| `content.attachment` | `contentType` `text/plain`, `data` the UTF-8 bytes (base64 written by HAPI's serializer), `size` |
+
+**Creating** checks, before the single FHIR write: role (PostgreSQL), Patient
+ID, body (only `encounterId` and `content`; any other property is 400),
+the text, the clinician's linked Practitioner (`PRACTITIONER_NOT_LINKED`,
+422), the Patient in `registered_patients` (registered or imported) and in
+FHIR (404), the Encounter (`ENCOUNTER_NOT_FOUND`, 422) and that it belongs to
+this Patient (`ENCOUNTER_NOT_FOR_PATIENT`, 422), and the Practitioner in FHIR
+(`PRACTITIONER_NOT_FOUND`, 422). A note never creates an Encounter; MediPortal
+asks the clinician to create one first. The created ID must be confirmed by the
+server (201, `DocumentReference/{valid id}`). A timeout or 502/503 after the
+write was sent may still have stored the note: MediPortal says that the outcome
+is uncertain and offers **Refresh** before trying again; nothing is retried
+automatically. "Authorized STAFF" means a STAFF account linked to a
+Practitioner (operator command); without one, STAFF can read notes but not
+write them.
+
+**Text:** required, not only whitespace, at most **10,000 characters**
+(Unicode code points, after line endings are normalized to `\n` and the text
+is trimmed; inner line breaks are kept). Control characters other than tab and
+line feed and invalid Unicode are rejected (`CONTENT_INVALID`). The same rules
+and limit apply in MediPortal. Notes are shown as plain text (React escaping,
+`white-space: pre-wrap`), never as HTML or Markdown.
+
+**Reading** (`FhirDocumentReferenceClient.findByPatientId`): `subject=Patient/{id}`,
+at most 10 pages / 1,000 results, next links only on the configured base.
+Every entry must be a DocumentReference with a valid unique ID whose subject is
+exactly this Patient; otherwise the whole search fails (502) so another
+patient's note can never be shown. Notes marked `entered-in-error` are left
+out; the rest are sorted newest first (`date`, otherwise `meta.lastUpdated`).
+Only the first inline `text/plain` attachment (optionally
+`charset=utf-8`) is decoded, as strict UTF-8 and at most 256 KiB; attachment
+URLs are never fetched, and any other format is returned as
+`contentAvailable: false` ("cannot display"). The visit is shown (date and
+type) only if it is one of this Patient's Encounters (one Encounter search; if
+that fails, notes are shown without visit details); author names are read once
+per Practitioner (at most 25 per list). Responses contain decoded text and
+readable values only, never base64 or raw FHIR JSON.
+
+**Patients** read notes only through `/api/patients/me/notes`: the Patient is
+the account's approved `users.fhir_patient_id` (404 `RECORD_NOT_LINKED`
+without one); patients cannot write notes (403).
+
+**Limitations:** no editing, deletion, signing, amendments or attachments
+other than plain text; notes written elsewhere in other formats are listed but
+not shown; DocumentReference writes were tested only against the local FHIR
+test server, never against KTH.
+
+Tests: `ClinicalNoteMapperTest` (incl. R4 validation),
+`FhirDocumentReferenceClientTest`, `ClinicalNoteServiceTest`,
+`ClinicalNoteControllerTest` and `ClinicalNoteIntegrationTest` (PostgreSQL
+`medinexus_test`, local FHIR server).
+
+### Diagnoses (US-05.02)
+
+Clinicians record diagnoses for a patient; patients read their own. A
+diagnosis is stored **only in HAPI FHIR** as an R4 **Condition**, through the
+existing Epic 3 `FhirConditionClient` and `ConditionMapper` (`DiagnosisService`,
+`DiagnosisController`); there is no diagnosis table, entity or migration, and
+no diagnosis in PostgreSQL or in logs. The KTH CapabilityStatement declares
+Condition `create` and `search-type` with `subject`, `patient`, `encounter`
+and `recorded-date` (read-only check, 2026-11-12).
+
+| Endpoint | Roles | Purpose |
+|---|---|---|
+| `POST /api/patients/{id}/conditions` | DOCTOR, STAFF with a linked Practitioner (CSRF) | record a diagnosis; 201 with the diagnosis |
+| `GET /api/patients/{id}/conditions` | DOCTOR, STAFF | all of the Patient's Conditions, newest recorded first |
+| `GET /api/patients/me/conditions` | PATIENT | the signed-in patient's own Conditions; no ID is accepted |
+
+There is no update or delete endpoint; patients can never write.
+
+**Request** (`NewDiagnosisRequest`, strict: any other property, such as
+`patientId`, `subject` or `recorder`, is 400): `diagnosis` (required text, at
+most 250 characters, one line), optional `code` with `codeSystem`
+(`SNOMED_CT` or `ICD_10`), `clinicalStatus` (an R4 `condition-clinical`
+code, default `ACTIVE`), `verificationStatus` (`CONFIRMED` by default, or
+`PROVISIONAL`, `DIFFERENTIAL`, `UNCONFIRMED`; `refuted` and
+`entered-in-error` are not "recording" a diagnosis), optional `onsetDate`
+(`YYYY-MM-DD`, 1900 or later, not in the future) and optional `encounterId`.
+
+**Condition written:**
+
+| Element | Value |
+|---|---|
+| `subject` | `Patient/{id}` from the URL path |
+| `code` | `text` = the diagnosis; one coding only if a code was given: `http://snomed.info/sct` or `http://hl7.org/fhir/sid/icd-10` |
+| `clinicalStatus` | `http://terminology.hl7.org/CodeSystem/condition-clinical` |
+| `verificationStatus` | `http://terminology.hl7.org/CodeSystem/condition-ver-status` (`confirmed` by default) |
+| `category` | `condition-category` `encounter-diagnosis` with a visit, otherwise `problem-list-item` |
+| `recordedDate` | the time of recording (UTC, seconds) |
+| `onsetDateTime` | the onset date, if given |
+| `encounter` | `Encounter/{id}`, only an existing Encounter whose subject is this Patient |
+| `recorder` | `Practitioner/{id}` from the signed-in clinician's `users.fhir_practitioner_id`, never from the request |
+
+Valid FHIR R4 (`ConditionDiagnosisMappingTest`, HAPI's offline R4 validator).
+
+**Coding rules:** no code is ever invented. A diagnosis without a verified code
+is stored as `Condition.code.text` only; for this, `ConditionMapper` now
+accepts a text-only `code` (valid in R4; until US-05.02 the Epic 3 mapper
+required a coding). A given code is checked for structure (MediCore has no
+terminology server, so whether the code exists is not checked): SNOMED CT as a
+concept ID (6–18 digits, partition `00`/`10`, Verhoeff check digit), ICD-10
+(WHO) as a letter, two digits and an optional subdivision (`J45`, `E11.9`,
+stored in upper case). The same rules apply in MediPortal.
+
+**Recording** checks, before the single FHIR write: role (PostgreSQL), Patient
+ID, body and values (400 with codes such as `DIAGNOSIS_REQUIRED`,
+`CODE_INVALID`, `ONSET_IN_FUTURE`), the clinician's Practitioner
+(`PRACTITIONER_NOT_LINKED`, 422; it becomes the recorder), the Patient in
+`registered_patients` and in FHIR (404), the optional Encounter
+(`ENCOUNTER_NOT_FOUND` / `ENCOUNTER_NOT_FOR_PATIENT`, 422) and the
+Practitioner in FHIR (`PRACTITIONER_NOT_FOUND`, 422). Never creates an
+Encounter or Practitioner, never updates an existing Condition (only `POST`
+without ID). A timeout or 502/503 may follow a stored Condition: MediPortal
+says the outcome is uncertain and offers **Refresh**; nothing is retried.
+
+**Reading** uses `FhirConditionClient.findByPatientId` unchanged:
+`subject=Patient/{id}`, at most 10 pages / 1,000 results, next links only on the
+configured base, and any entry that is not a Condition of exactly this Patient
+fails the whole search (502). **All** of the Patient's Conditions are listed,
+not only those created by MediCore, so for an **imported** Patient the
+diagnoses already on the server appear, even with missing optional data
+(no status, no dates, coding without text, onset as age or period). Conditions
+with verification status `entered-in-error` are left out; the rest are sorted
+by `recordedDate`, newest first, undated last. The visit is shown only if it is
+one of this Patient's Encounters (one Encounter search, only when a Condition
+has an encounter; if it fails, diagnoses are shown without it); recorder names
+are read once per Practitioner (at most 25 per list). Responses are readable
+values (`DiagnosisDto`), never Condition JSON.
+
+**Limitations:** no editing, resolving, deleting or refuting of diagnoses; no
+terminology lookup (codes are checked for structure only); Swedish ICD-10-SE
+codes are entered as ICD-10; Condition writes were tested only against the
+local FHIR test server, never against KTH.
+
+Tests: `DiagnosisCodeSystemTest`, `ConditionDiagnosisMappingTest`,
+`DiagnosisServiceTest`, `DiagnosisControllerTest`, `DiagnosisIntegrationTest`
+(PostgreSQL `medinexus_test`, local FHIR server) and the Epic 3 Condition
+client tests (`FhirConditionCreateTest`, `FhirConditionSearchTest`).
+
 ### Patient updates (US-04.04)
 
 `PATCH /api/patients/{id}` (`PatientController` → `PatientService.updatePatient`
@@ -533,10 +780,100 @@ Patient exists in FHIR but is not searchable, and registering it again would be
 a duplicate (409). MediPortal tells the user not to register again.
 
 **Patients registered before V5** have no registry entry and are no longer
-found or shown unless they are linked to an account. MediCore cannot identify
-them on the shared server. An operator can add a known ID with
-`INSERT INTO registered_patients (fhir_patient_id) VALUES ('...')`; a dedicated
-operator command does not exist yet.
+found or shown unless they are linked to an account. A doctor or staff member
+can add them, and any other existing Patient, with **Import Existing Patient**
+(below).
+
+### Import Existing Patient
+
+DOCTOR and STAFF can add a Patient that **already exists** on the configured
+FHIR server to MediCore (`PatientImportService`, `PatientImportController`,
+MediPortal `/patients/import`, next to Register patient). This is a
+**reference import**: the FHIR Patient is reused as it is, never created,
+changed or copied. **Register patient** creates a new Patient in FHIR;
+**Import** only records the ID of an existing one.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/patients/import/search` `{"mode","value"}` | discovery search, `mode` `NAME`, `PERSONNUMMER` or `ID` |
+| `POST /api/patients/import` `{"fhirPatientId"}` | import: 201, or 409 `ALREADY_REGISTERED` |
+
+Both require DOCTOR or STAFF (URL rule and the current role in PostgreSQL) and
+CSRF; PATIENT accounts can never browse the shared Patient directory. Bodies
+are read strictly (any other field is 400).
+
+**Discovery search** (`FhirPatientClient.discoverPatients`) is the only search
+that is *not* restricted to `registered_patients`, because its purpose is to
+find Patients that MediCore does not know yet; the normal patient search stays
+restricted. It is read-only (`POST [base]/Patient/_search`, so names and
+personnummer never appear in URLs): name parts (all must match) or an exact
+personnummer (`identifier=system|value`, only exact matches kept); `ID` mode is
+one `GET Patient/{id}`. Bounded: 20 per page, at most 5 pages (requests) and
+100 Patients, then the result is marked `truncated` and MediPortal asks for a
+more specific search; MediPortal pages the results 10 at a time. Every entry
+must be a Patient with a valid logical ID, appear once and be a search match,
+and next links must stay on the FHIR base, otherwise the search fails (502).
+Results are readable DTOs (name, personnummer as stored, gender, birth date)
+with `registered` (already known to MediCore), `importable` and
+`journalMatchable`; patients with the same name are separate results.
+
+**Import eligibility vs. journal access matching:** a Patient is *importable*
+if it has a name and a birth date or an identifier, so that clinicians can tell
+it apart (otherwise 422 `PATIENT_NOT_IMPORTABLE`). It is *journal-matchable*
+only if it has exactly one valid personnummer with the MediCore identifier
+system (`PatientPersonnummer`); a missing, invalid or foreign identifier is
+never invented or overwritten, so such a Patient can be used clinically but
+never matched with a patient account.
+
+**Personnummer formats:** the KTH server uses the **same** identifier system,
+`http://electronichealth.se/identifier/personnummer` (identifier type text
+"Personnummer", next to Synthea and MRN identifiers), but stores the value as
+`YYYYMMDD-XXXX` (checked read-only on 2026-11-12), while MediCore writes
+`YYYYMMDDXXXX`. Both forms are the same personnummer:
+`Personnummer.canonical` accepts exactly these two forms (the hyphen only after
+the eight date digits, nothing else removed), requires a real calendar date and,
+for Patients and accounts, a birth date that is not in the future; the check
+digit is not checked (no Luhn), as before. FHIR values are only *read* in this
+canonical form, never rewritten. Personnummer searches (patient search,
+discovery, journal matching) send both forms as one FHIR token OR
+(`identifier=system|YYYYMMDDXXXX,system|YYYYMMDD-XXXX`, verified read-only on the
+KTH server: the 12-digit form alone finds no KTH Patient) and compare results
+canonically. Only MediCore's system counts: a 12-digit value in any other system
+(for example an MRN) is never a personnummer, and the name is never used. A
+Patient with several *different* personnummer values (or a valid and an invalid
+one) is `AMBIGUOUS`: shown with a warning and never matched. Journal access
+compares canonical values when a request is matched (import, explicit request,
+dashboard retry), in the doctor's review (`personnummerMatches`) and at
+approval; a doctor must still approve before `users.fhir_patient_id` is set.
+Patient registration is unchanged (it still writes and conditionally creates
+the 12-digit form).
+
+**Import:** one read (404/410 → 404; a response for another ID → 502), the
+eligibility check, then `INSERT … ON CONFLICT DO NOTHING` into
+`registered_patients` (`PatientRegistry.recordImport`): only the FHIR ID, the
+importing account and the time. A single statement, so concurrent imports of
+the same Patient create one row and the others get 409. No FHIR write of any
+kind. Afterwards the Patient is a normal MediCore Patient: patient search,
+profile, Edit Patient (gender), Encounters (existing FHIR Encounters with that
+subject are listed through the usual endpoint and limits) and future clinical
+resources use the same Patient ID.
+
+**Journal access:** an import never creates a request and never links an
+account. If the PATIENT account with the same valid personnummer already asked
+for access and its request is `AWAITING_RECORD`, `JournalAccessMatcher`
+(`onPatientImported` → `resolveAwaiting`) matches it again: it becomes
+`PENDING` only if exactly one free registered Patient has that personnummer;
+several, or one linked to another account, leave it waiting. A doctor must
+still approve it; `users.fhir_patient_id` is set only then. A matching failure
+is logged and does not undo the import (the next dashboard visit retries).
+
+Logs contain the account ID, the search mode and counts only. Only
+course-appropriate synthetic patients should be imported from the shared KTH
+server.
+
+Tests: `FhirPatientDiscoveryTest`, `PatientImportServiceTest`,
+`PatientImportControllerTest` and `PatientImportIntegrationTest`
+(`medinexus_test`, local FHIR server).
 
 ### Fictional patient identities
 
@@ -987,6 +1324,13 @@ All five also declare versioned updates, conditional create and conditional
 update. `updateCreate` is `false`: a client cannot choose the ID of a new
 resource with `PUT`; new resources get a server-assigned ID via `POST`.
 
+DocumentReference (checked with a read-only `GET [base]/metadata` on
+2026-11-12 for US-05.01, server HAPI FHIR 7.4.0, FHIR 4.0.1) declares `read`,
+`vread`, `search-type`, `create`, `update`, `patch`, `delete` and the history
+interactions, conditional create, and among others the search parameters
+`subject`, `patient`, `encounter`, `author`, `type` and `date`. MediCore uses
+`create` and `search-type` with `subject` only.
+
 Organization and Location (checked with a read-only `GET [base]/metadata` for
 US-03.05) declare the same interactions as Patient, `versioning`
 `versioned-update`, `updateCreate` `false`, conditional create and update, and
@@ -1020,7 +1364,7 @@ parameters or the original HAPI exception.
 
 Operation names are fixed (`capabilities`, `patient-read`, `practitioner-read`,
 `observation-read`/`-create`/`-search`, `condition-read`/`-create`/`-search`,
-`encounter-read`/`-create`/`-search`,
+`encounter-read`/`-create`/`-search`, `document-reference-create`/`-search`,
 `organization-read`/`-create`/`-update`, `location-read`/`-create`/`-update`);
 IDs and search values never appear in
 them. Invalid input (`IllegalArgumentException`) is rejected before any request

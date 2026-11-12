@@ -44,7 +44,10 @@ public class ConditionMapper {
                 condition.getCategory().stream().map(this::concept).toList(),
                 condition.hasSeverity() ? concept(condition.getSeverity()) : null,
                 condition.hasOnset() ? temporal(condition.getOnset()) : null,
-                condition.hasAbatement() ? temporal(condition.getAbatement()) : null);
+                condition.hasAbatement() ? temporal(condition.getAbatement()) : null,
+                condition.hasRecordedDateElement() ? condition.getRecordedDateElement().getValueAsString() : null,
+                condition.hasEncounter() ? subject(condition.getEncounter()) : null,
+                condition.hasRecorder() ? subject(condition.getRecorder()) : null);
     }
 
     private SubjectReference subject(Reference reference) {
@@ -88,9 +91,13 @@ public class ConditionMapper {
                 "http://terminology.hl7.org/CodeSystem/condition-category".equals(coding.system()) && "problem-list-item".equals(coding.code()));
         if (problemList && request.verificationStatus() != VerificationStatus.ENTERED_IN_ERROR && request.clinicalStatus() == null) throw invalid();
 
+        if (request.encounterId() != null && !request.encounterId().matches("[A-Za-z0-9.-]{1,64}")
+                || request.recorderId() != null && !request.recorderId().matches("[A-Za-z0-9.-]{1,64}")) throw invalid();
+
         Condition resource = new Condition();
         resource.setSubject(new Reference("Patient/" + request.patientId()));
-        resource.setCode(createConcept(request.code(), true));
+        // A diagnosis without a verified code is text only (Condition.code.text, US-05.02); no code is invented.
+        resource.setCode(createConcept(request.code(), false));
         if (request.clinicalStatus() != null) resource.setClinicalStatus(new CodeableConcept().addCoding(
                 new org.hl7.fhir.r4.model.Coding(ClinicalStatus.SYSTEM, request.clinicalStatus().code(), null)));
         if (request.verificationStatus() != null) resource.setVerificationStatus(new CodeableConcept().addCoding(
@@ -99,6 +106,9 @@ public class ConditionMapper {
         if (request.severity() != null) resource.setSeverity(createConcept(request.severity(), false));
         if (request.onsetDateTime() != null) resource.setOnset(dateTime(request.onsetDateTime()));
         if (request.abatementDateTime() != null) resource.setAbatement(dateTime(request.abatementDateTime()));
+        if (request.recordedDate() != null) resource.setRecordedDateElement(dateTime(request.recordedDate()));
+        if (request.encounterId() != null) resource.setEncounter(new Reference("Encounter/" + request.encounterId()));
+        if (request.recorderId() != null) resource.setRecorder(new Reference("Practitioner/" + request.recorderId()));
         return resource;
     }
 
