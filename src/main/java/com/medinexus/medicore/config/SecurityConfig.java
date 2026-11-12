@@ -101,6 +101,9 @@ public class SecurityConfig {
                         // The PATIENT's own record; must come before the DOCTOR/STAFF rule for /api/patients/*.
                         .requestMatchers(HttpMethod.GET, "/api/patients/me").hasRole("PATIENT")
                         // Encounters (US-05.05): the PATIENT's own (before the rule below); DOCTOR/STAFF per Patient.
+                        .requestMatchers(HttpMethod.GET, "/api/patients/me/observations").hasRole("PATIENT")
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/observations").hasAnyRole("DOCTOR", "STAFF")
+                        .requestMatchers(HttpMethod.POST, "/api/patients/*/observations").hasAnyRole("DOCTOR", "STAFF")
                         .requestMatchers(HttpMethod.GET, "/api/patients/me/encounters").hasRole("PATIENT")
                         .requestMatchers(HttpMethod.GET, "/api/patients/*/encounters").hasAnyRole("DOCTOR", "STAFF")
                         .requestMatchers(HttpMethod.POST, "/api/patients/*/encounters").hasAnyRole("DOCTOR", "STAFF")

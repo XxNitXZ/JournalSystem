@@ -6,7 +6,11 @@ import com.medinexus.medicore.medicalrecord.dto.ObservationDto.Concept;
 
 /** Internal create input: no caller-selected Observation ID or arbitrary subject URL. */
 public record CreateObservationRequest(String patientId, Status status, Concept code,
-        Value value, Concept dataAbsentReason) {
+        Value value, Concept dataAbsentReason, String effectiveDateTime) {
+
+    public CreateObservationRequest(String patientId, Status status, Concept code, Value value, Concept dataAbsentReason) {
+        this(patientId, status, code, value, dataAbsentReason, null);
+    }
 
     public enum Status {
         REGISTERED, PRELIMINARY, FINAL, AMENDED, CORRECTED, CANCELLED, ENTERED_IN_ERROR, UNKNOWN

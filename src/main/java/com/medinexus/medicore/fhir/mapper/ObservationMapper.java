@@ -1,6 +1,11 @@
 package com.medinexus.medicore.fhir.mapper;
 
 import java.net.URI;
+import java.time.Year;
+import java.time.YearMonth;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Locale;
 
 import org.hl7.fhir.r4.model.BooleanType;
@@ -110,6 +115,7 @@ public class ObservationMapper {
                 request.status().name().toLowerCase(Locale.ROOT).replace('_', '-')));
         observation.setSubject(new Reference("Patient/" + request.patientId()));
         observation.setCode(concept(request.code()));
+        if (request.effectiveDateTime() != null) observation.setEffective(dateTime(request.effectiveDateTime()));
         if (request.value() instanceof CreateObservationRequest.QuantityValue value) {
             if (value.value() == null || (value.system() == null) != (value.code() == null)
                     || value.system() != null && (!absoluteUri(value.system()) || !nonblank(value.code()))) {
@@ -138,6 +144,24 @@ public class ObservationMapper {
             if (coding.userSelected() != null) mapped.setUserSelected(coding.userSelected());
         }
         return result;
+    }
+
+    private DateTimeType dateTime(String text) {
+        try {
+            if (!text.matches("[0-9]{4}.*") || text.startsWith("0000")) throw invalid();
+            if (text.matches("[0-9]{4}")) Year.parse(text);
+            else if (text.matches("[0-9]{4}-[0-9]{2}")) YearMonth.parse(text);
+            else if (text.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")) LocalDate.parse(text);
+            else {
+                if (!text.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})")) throw invalid();
+                // Validate calendar/offset without reducing the lexical precision stored in the FHIR value.
+                String validation = text.replaceFirst("(\\.[0-9]{9})[0-9]+", "$1");
+                if (Math.abs(OffsetDateTime.parse(validation).getOffset().getTotalSeconds()) > 14 * 3600) throw invalid();
+            }
+            return new DateTimeType(text);
+        } catch (DateTimeParseException exception) {
+            throw invalid();
+        }
     }
 
     private boolean absoluteUri(String value) {
