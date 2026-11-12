@@ -1,6 +1,15 @@
 package com.medinexus.medicore.fhir.client;
 
 import java.util.Objects;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import org.hl7.fhir.r4.model.Bundle;
+import com.medinexus.medicore.organization.dto.OrganizationDto;
 
 import org.hl7.fhir.instance.model.api.IIdType;
 import org.hl7.fhir.r4.model.IdType;
@@ -18,6 +27,9 @@ import com.medinexus.medicore.organization.dto.OrganizationWriteRequest;
 @Component
 public class FhirOrganizationClient {
 
+    private static final int PAGE_SIZE = 100;
+    private static final int MAX_PAGES = 10;
+    private static final int MAX_ENTRIES = 1_000;
     private static final String LOGICAL_ID = "[A-Za-z0-9.-]{1,64}";
 
     private final OrganizationMapper mapper;
@@ -36,6 +48,75 @@ public class FhirOrganizationClient {
         requireId(id);
         return requestExecutor.execute("organization-read", () -> fhirClient.read()
                 .resource(Organization.class).withId(id).execute());
+    }
+
+    /** Active, named Organizations; at most 10 pages / 1,000 examined entries, with no partial success. */
+    public List<OrganizationDto> findActiveOrganizations() {
+        return requestExecutor.execute("organization-search", () -> {
+            URI base = URI.create(fhirClient.getServerBase());
+            URI current = URI.create(base + "/Organization");
+            Set<URI> visited = new HashSet<>();
+            visited.add(current);
+            Set<String> ids = new HashSet<>();
+            List<OrganizationDto> results = new ArrayList<>();
+            int examined = 0;
+            int declaredTotal = 0;
+            Bundle bundle = fhirClient.search().forResource(Organization.class)
+                    .where(Organization.ACTIVE.exactly().code("true")).count(PAGE_SIZE)
+                    .returnBundle(Bundle.class).execute();
+            for (int page = 1; ; page++) {
+                if (bundle == null || bundle.getType() != Bundle.BundleType.SEARCHSET) throw invalidSearch();
+                if (bundle.hasTotal()) declaredTotal = Math.max(declaredTotal, bundle.getTotal());
+                for (var entry : bundle.getEntry()) {
+                    if (++examined > MAX_ENTRIES || !(entry.getResource() instanceof Organization organization)
+                            || entry.hasSearch() && entry.getSearch().hasMode()
+                                && entry.getSearch().getMode() != Bundle.SearchEntryMode.MATCH
+                            || !organization.hasId() || !organization.getIdElement().getIdPart().matches(LOGICAL_ID)
+                            || !ids.add(organization.getIdElement().getIdPart())) throw invalidSearch();
+                    if (organization.hasActive() && organization.getActive()
+                            && organization.hasName() && !organization.getName().isBlank()) {
+                        try { results.add(mapper.toDto(organization)); }
+                        catch (IllegalArgumentException failure) { throw invalidSearch(); }
+                    }
+                }
+                var links = bundle.getLink().stream().filter(link -> "next".equals(link.getRelation())).toList();
+                if (links.isEmpty()) {
+                    if (declaredTotal > examined) throw invalidSearch();
+                    results.sort(Comparator.comparing(OrganizationDto::name, String.CASE_INSENSITIVE_ORDER)
+                            .thenComparing(OrganizationDto::id));
+                    return List.copyOf(results);
+                }
+                if (page == MAX_PAGES || links.size() != 1 || !links.getFirst().hasUrl()) throw invalidSearch();
+                URI next = nextUri(current, links.getFirst().getUrl(), base);
+                if (!visited.add(next)) throw invalidSearch();
+                current = next;
+                bundle = fhirClient.loadPage().byUrl(next.toString()).andReturnBundle(Bundle.class).execute();
+            }
+        });
+    }
+
+    private URI nextUri(URI current, String link, URI base) {
+        try {
+            URI next = link.startsWith("?")
+                    ? URI.create(current.toString().split("\\?", 2)[0] + link) : current.resolve(URI.create(link));
+            String path = next.getPath();
+            // HAPI serves subsequent pages at the base endpoint using an opaque _getpages token.
+            boolean rootPage = base.getPath().equals(path) && next.getRawQuery() != null
+                    && Arrays.stream(next.getRawQuery().split("&"))
+                            .filter(part -> part.startsWith("_getpages=") && part.length() > 10).count() == 1;
+            if (!base.getScheme().equalsIgnoreCase(next.getScheme())
+                    || !base.getHost().equalsIgnoreCase(next.getHost()) || base.getPort() != next.getPort()
+                    || next.getUserInfo() != null || next.getFragment() != null
+                    || path == null || !path.equals(base.getPath() + "/Organization") && !rootPage
+                    || !next.normalize().equals(next) || next.getRawPath().contains("%") || path.contains("\\")) {
+                throw invalidSearch();
+            }
+            return next;
+        } catch (IllegalArgumentException failure) { throw invalidSearch(); }
+    }
+
+    private DataFormatException invalidSearch() {
+        return new DataFormatException("Invalid or unsafe Organization search response");
     }
 
     /** Internal POST [base]/Organization. A failed response may follow a committed write; do not retry blindly. */

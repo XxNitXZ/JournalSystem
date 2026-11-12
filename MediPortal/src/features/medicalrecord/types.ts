@@ -39,6 +39,7 @@ export const newVisitStatusLabels: Record<NewVisitStatus, string> = {
  * startTime is ISO 8601 with the browser's offset.
  */
 export interface NewEncounterRequest {
+  organizationId?: string
   startTime: string
   practitionerId: string
   type: VisitType
@@ -187,4 +188,10 @@ export interface EncounterListResult {
   encounters: EncounterSummary[]
   complete: boolean
   excludedCount: number
+}
+
+/** An active named Organization available as an optional healthcare provider. */
+export interface OrganizationOption {
+  id: string
+  name: string
 }

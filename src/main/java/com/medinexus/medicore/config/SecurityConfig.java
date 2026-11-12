@@ -117,6 +117,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/patients/me/conditions").hasRole("PATIENT")
                         .requestMatchers(HttpMethod.GET, "/api/patients/*/conditions").hasAnyRole("DOCTOR", "STAFF")
                         .requestMatchers(HttpMethod.POST, "/api/patients/*/conditions").hasAnyRole("DOCTOR", "STAFF")
+                        .requestMatchers(HttpMethod.GET, "/api/organizations").hasAnyRole("DOCTOR", "STAFF")
                         .requestMatchers(HttpMethod.GET, "/api/practitioners").hasAnyRole("DOCTOR", "STAFF")
                         // Journal access: PATIENT status and own request; DOCTOR review (list, count, details,
                         // decisions).

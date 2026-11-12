@@ -1,5 +1,5 @@
 import { apiGet, apiPost, type ApiRequestOptions } from '../../services/apiClient.ts'
-import type { EncounterListResult, EncounterSummary, NewEncounterRequest, PractitionerOption } from './types.ts'
+import type { EncounterListResult, EncounterSummary, NewEncounterRequest, OrganizationOption, PractitionerOption } from './types.ts'
 
 /** The visits of one registered patient, newest first (DOCTOR and STAFF). */
 export function listPatientEncounters(patientId: string, options?: ApiRequestOptions): Promise<EncounterListResult> {
@@ -20,4 +20,9 @@ export function createEncounter(patientId: string, request: NewEncounterRequest,
 /** The practitioners that can be chosen for a visit (DOCTOR and STAFF). */
 export function listPractitioners(options?: ApiRequestOptions): Promise<PractitionerOption[]> {
   return apiGet<PractitionerOption[]>('/api/practitioners', options)
+}
+
+/** Optional healthcare providers; organizations are not necessarily hospitals. */
+export function listOrganizations(options?: ApiRequestOptions): Promise<OrganizationOption[]> {
+  return apiGet<OrganizationOption[]>('/api/organizations', options)
 }

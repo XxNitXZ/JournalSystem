@@ -3,6 +3,7 @@ import {
   newVisitStatuses,
   visitTypes,
   type EncounterSummary,
+  type OrganizationOption,
   type NewEncounterRequest,
   type NewVisitStatus,
   type VisitType,
@@ -10,6 +11,7 @@ import {
 
 /** The Create Encounter form as entered. visitTime is the datetime-local value (YYYY-MM-DDTHH:MM, local time). */
 export interface EncounterFields {
+  organizationId?: string
   visitTime: string
   practitionerId: string
   type: string
@@ -57,9 +59,13 @@ export function encounterRequest(fields: EncounterFields, now = new Date()):
   }
   if (!fields.practitionerId) return { ok: false, error: 'Select a practitioner.' }
   if (!visitTypes.some((type) => type === fields.type)) return { ok: false, error: 'Select a visit type.' }
+  if (fields.organizationId && !/^[A-Za-z0-9.-]{1,64}$/.test(fields.organizationId)) {
+    return { ok: false, error: 'Select a valid healthcare provider or leave it unselected.' }
+  }
   return {
     ok: true,
     request: {
+      ...(fields.organizationId ? { organizationId: fields.organizationId } : {}),
       startTime: toIsoWithOffset(visit),
       practitionerId: fields.practitionerId,
       type: fields.type as VisitType,
@@ -156,4 +162,15 @@ export function encounterErrorMessage(error: unknown, action: 'load' | 'create')
       return action === 'create' ? 'The encounter could not be created. Please try again later.'
         : 'The encounters could not be loaded. Please try again later.'
   }
+}
+
+/** Keep distinct IDs and the selected option even when a new search does not match it. */
+export function filterOrganizations(organizations: OrganizationOption[], query: string, selectedId = ''): OrganizationOption[] {
+  const search = query.trim().toLocaleLowerCase()
+  return organizations.filter((item) => item.id === selectedId || item.name.toLocaleLowerCase().includes(search))
+}
+
+export function organizationLabel(item: OrganizationOption, organizations: OrganizationOption[]): string {
+  return organizations.some((other) => other.id !== item.id && other.name.toLocaleLowerCase() === item.name.toLocaleLowerCase())
+    ? `${item.name} (${item.id})` : item.name
 }

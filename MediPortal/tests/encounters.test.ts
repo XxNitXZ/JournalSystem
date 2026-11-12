@@ -26,6 +26,90 @@ test('encounters: list, create form, validation, API and permissions', async (co
     const { renderRoute } = await server.ssrLoadModule('/tests/auth-navigation-render.tsx')
     const { canEditPatients } = await server.ssrLoadModule('/src/features/patientmanagement/patientUpdate.ts')
 
+    await context.test('optional healthcare provider loads through the shared credentialed API and supports cancellation', async () => {
+      const providers = [{ id: 'org-a', name: 'Synthetic Provider' }]
+      const controller = new AbortController()
+      let receivedSignal: AbortSignal | null | undefined
+      globalThis.fetch = async (url, options) => {
+        assert.equal(String(url), `${API_BASE_URL}/api/organizations`)
+        assert.equal(options?.credentials, 'include')
+        assert.equal(options?.method, 'GET')
+        receivedSignal = options?.signal
+        return new Response(JSON.stringify(providers))
+      }
+      assert.deepEqual(await service.listOrganizations({ signal: controller.signal }), providers)
+      assert.equal(receivedSignal, controller.signal)
+      globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      })
+      const pending = service.listOrganizations({ signal: controller.signal })
+      controller.abort()
+      await assert.rejects(pending, { name: 'AbortError' })
+      globalThis.fetch = async () => new Response('', { status: 503 })
+      await assert.rejects(service.listOrganizations(), (error: unknown) => error instanceof ApiError && error.status === 503)
+    })
+
+    await context.test('provider filtering preserves IDs, disambiguates duplicates and retains a selection', () => {
+      const providers = [
+        { id: 'org-a', name: 'Synthetic Provider' }, { id: 'org-b', name: 'Synthetic Provider' },
+        { id: 'org-c', name: 'Other Provider' },
+      ]
+      assert.deepEqual(form.filterOrganizations(providers, '  SYNTHETIC '), providers.slice(0, 2))
+      assert.deepEqual(form.filterOrganizations(providers, 'no match'), [])
+      assert.deepEqual(form.filterOrganizations(providers, 'no match', 'org-b'), [providers[1]])
+      assert.equal(form.organizationLabel(providers[0], providers), 'Synthetic Provider (org-a)')
+      assert.equal(form.organizationLabel(providers[1], providers), 'Synthetic Provider (org-b)')
+      assert.equal(form.organizationLabel(providers[2], providers), 'Other Provider')
+      const html = render.renderForm({ status: 'loaded', practitioners }, false, '', { status: 'loaded', organizations: providers })
+      assert.match(html, /label[^>]*for="encounter-provider"[^>]*>Healthcare provider/)
+      assert.match(html, /type="search"/)
+      assert.match(html, /name="organizationId"/)
+      assert.match(html, /No healthcare provider selected/)
+      assert.match(html, /value="org-a"[^>]*>Synthetic Provider \(org-a\)/)
+      assert.match(html, /value="org-b"[^>]*>Synthetic Provider \(org-b\)/)
+      assert.doesNotMatch(html, /<fieldset disabled/)
+    })
+
+    await context.test('provider loading, failure and empty states never block an otherwise valid form', () => {
+      for (const state of [{ status: 'loading' }, { status: 'failed' }, { status: 'loaded', organizations: [] }]) {
+        const html = render.renderForm({ status: 'loaded', practitioners }, false, '', state)
+        assert.doesNotMatch(html, /<fieldset disabled/)
+        assert.match(html, /No healthcare provider selected/)
+        if (state.status === 'loading') assert.match(html, /Loading healthcare providers/)
+        if (state.status === 'failed') assert.match(html, /role="alert"[^>]*>.*Healthcare providers could not be loaded/s)
+        if (state.status === 'loaded') assert.match(html, /No healthcare providers are available/)
+      }
+    })
+
+    await context.test('provider is omitted when empty and exact selected ID is sent with existing CSRF POST', async () => {
+      const fields = { visitTime: '2026-11-10T14:30', practitionerId: 'p-own', type: 'CONSULTATION', status: 'FINISHED' }
+      const now = new Date('2026-11-12T12:00:00Z')
+      for (const organizationId of [undefined, '']) {
+        const checked = form.encounterRequest({ ...fields, organizationId }, now)
+        assert.equal(checked.ok, true)
+        assert.equal(Object.hasOwn(checked.request, 'organizationId'), false)
+      }
+      assert.equal(form.encounterRequest({ ...fields, organizationId: 'Organization/not-an-id' }, now).ok, false)
+      const bodies: Record<string, unknown>[] = []
+      globalThis.fetch = async (url, options) => {
+        if (String(url).endsWith('/api/auth/csrf')) return new Response(JSON.stringify({ token: 'csrf-test', headerName: 'X-XSRF-TOKEN' }))
+        assert.equal(String(url), `${API_BASE_URL}/api/patients/syn-patient-1/encounters`)
+        assert.equal(options?.method, 'POST')
+        assert.equal(options?.credentials, 'include')
+        assert.equal(new Headers(options?.headers).get('X-XSRF-TOKEN'), 'csrf-test')
+        bodies.push(JSON.parse(String(options?.body)))
+        return new Response(JSON.stringify(visits[0]), { status: 201 })
+      }
+      const sent = await form.submitEncounter({ ...fields, organizationId: 'org-b' }, {
+        create: (request: Parameters<typeof service.createEncounter>[1]) => service.createEncounter('syn-patient-1', request),
+        onCreated: () => {},
+      }, now)
+      assert.equal(sent.ok, true)
+      assert.equal(bodies.length, 1)
+      assert.equal(bodies[0].organizationId, 'org-b')
+      assert.deepEqual(Object.keys(bodies[0]).sort(), ['organizationId', 'practitionerId', 'startTime', 'status', 'type'])
+    })
+
     await context.test('incomplete encounters warn in the section and both selectors, including all excluded', async () => {
       const notes = await server.ssrLoadModule('/tests/clinical-note-render.tsx')
       const diagnoses = await server.ssrLoadModule('/tests/diagnosis-render.tsx')
@@ -93,7 +177,7 @@ test('encounters: list, create form, validation, API and permissions', async (co
       assert.match(html, /<option value="CONSULTATION" selected="">Consultation<\/option>/)
       assert.match(html, /<option value="FINISHED" selected="">Finished<\/option>/)
       // No patient field and no technical IDs to type in.
-      for (const forbidden of ['patientId', 'subject', 'organizationId', 'locationId']) {
+      for (const forbidden of ['patientId', 'subject', 'locationId']) {
         assert.ok(!html.includes(`name="${forbidden}"`), forbidden)
       }
       assert.doesNotMatch(html, /syn-patient-1/)

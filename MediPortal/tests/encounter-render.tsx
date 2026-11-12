@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router'
-import { CreateEncounterFormView, type PractitionerState } from '../src/features/medicalrecord/CreateEncounterForm.tsx'
+import { CreateEncounterFormView, type PractitionerState, type OrganizationState } from '../src/features/medicalrecord/CreateEncounterForm.tsx'
 import EncountersSection, {
   EncounterListView,
   type EncounterListState,
@@ -21,9 +21,9 @@ export function renderSection(state: EncounterListState, createFor?: string, cre
   )
 }
 
-export function renderForm(practitionerState: PractitionerState, pending = false, error = '') {
+export function renderForm(practitionerState: PractitionerState, pending = false, error = '', organizationState?: OrganizationState) {
   return renderToStaticMarkup(
-    <CreateEncounterFormView practitionerState={practitionerState} defaultVisitTime="2026-11-10T14:30" pending={pending}
+    <CreateEncounterFormView practitionerState={practitionerState} organizationState={organizationState} defaultVisitTime="2026-11-10T14:30" pending={pending}
       error={error} onSubmit={() => {}} onCancel={() => {}} />,
   )
 }
