@@ -39,7 +39,14 @@ public class ObservationMapper {
                 observation.hasSubject() ? subject(observation.getSubject()) : null,
                 concept(observation.getCode()), observation.hasValue() ? value(observation.getValue()) : null,
                 observation.hasDataAbsentReason() ? concept(observation.getDataAbsentReason()) : null,
-                observation.getComponent().stream().map(this::component).toList());
+                observation.getComponent().stream().map(this::component).toList(),
+                observation.hasEffective() ? effective(observation.getEffective()) : null,
+                observation.hasIssued() ? observation.getIssuedElement().getValueAsString() : null);
+    }
+
+    private ObservationValue effective(Type effective) {
+        if (effective instanceof DateTimeType || effective instanceof Period) return value(effective);
+        throw new IllegalArgumentException("Observation effective type is not supported by this projection");
     }
 
     private ObservationDto.Component component(Observation.ObservationComponentComponent component) {

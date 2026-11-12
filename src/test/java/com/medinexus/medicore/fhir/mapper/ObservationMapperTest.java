@@ -191,4 +191,56 @@ class ObservationMapperTest {
                 .hasMessage("Observation value type is not supported by this projection");
     }
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"2026", "2026-06", "2026-06-15",
+            "2026-06-15T12:34:56+02:00", "2026-06-15T12:34:56.123456-05:30", "2026-06-15T12:34:56Z"})
+    void preservesEffectiveDateTimePrecisionAndOffsets(String date) {
+        ObservationDto dto = mapper.toDto(parse(",\"effectiveDateTime\":\"" + date + "\""));
+        assertThat(dto.effective()).isEqualTo(new ObservationValue(ValueType.DATE_TIME, new StringValue(date)));
+        assertThat(dto.issued()).isNull();
+    }
+
+    @Test
+    void preservesEffectivePeriodWithIndependentIssuedAndDateValuedResult() {
+        ObservationDto dto = mapper.toDto(parse("""
+                ,"effectivePeriod":{"start":"2026-06-15T12:00:00.123456+02:00","end":"2026-06-15T13:00:00+02:00"},
+                "issued":"2026-06-16T09:00:00.654321-04:00","valueDateTime":"2026-05"
+                """));
+        assertThat(dto.effective()).isEqualTo(new ObservationValue(ValueType.PERIOD,
+                new PeriodValue("2026-06-15T12:00:00.123456+02:00", "2026-06-15T13:00:00+02:00")));
+        assertThat(dto.issued()).isEqualTo("2026-06-16T09:00:00.654321-04:00");
+        assertThat(dto.value()).isEqualTo(new ObservationValue(ValueType.DATE_TIME, new StringValue("2026-05")));
+    }
+
+    @Test
+    void preservesOpenPeriodsAndAbsentDatesWithoutDefaults() {
+        assertThat(mapper.toDto(parse("" )).effective()).isNull();
+        assertThat(mapper.toDto(parse("" )).issued()).isNull();
+        assertThat(mapper.toDto(parse(",\"effectivePeriod\":{\"start\":\"2026-06\"}" )).effective())
+                .isEqualTo(new ObservationValue(ValueType.PERIOD, new PeriodValue("2026-06", null)));
+        assertThat(mapper.toDto(parse(",\"effectivePeriod\":{\"end\":\"2026\"}" )).effective())
+                .isEqualTo(new ObservationValue(ValueType.PERIOD, new PeriodValue(null, "2026")));
+        ObservationDto issuedOnly = mapper.toDto(parse(",\"issued\":\"2026-06-16T09:00:00Z\""));
+        assertThat(issuedOnly.effective()).isNull();
+        assertThat(issuedOnly.issued()).isEqualTo("2026-06-16T09:00:00Z");
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            ",\"effectiveInstant\":\"2026-06-15T12:00:00Z\"",
+            ",\"effectiveTiming\":{\"event\":[\"2026-06-15\"]}"})
+    void rejectsUnsupportedPopulatedEffectiveTypes(String fields) {
+        assertThatThrownBy(() -> mapper.toDto(parse(fields))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Observation effective type is not supported by this projection");
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            ",\"effectiveDateTime\":\"not-a-date\"",
+            ",\"effectivePeriod\":{\"start\":\"not-a-date\"}",
+            ",\"issued\":\"not-a-date\""})
+    void malformedTemporalInputIsRejectedByFhirParsing(String fields) {
+        assertThatThrownBy(() -> mapper.toDto(parse(fields))).isInstanceOf(ca.uhn.fhir.parser.DataFormatException.class);
+    }
+
 }
