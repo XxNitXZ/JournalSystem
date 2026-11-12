@@ -167,3 +167,139 @@ test('observations form, API, values and role-specific sections', async (context
     })
   } finally { globalThis.fetch = original; await server.close() }
 })
+
+test('clinical record list expansion, ordering, warnings and reset', async () => {
+  const hooksId = '\0observation-list-hooks'
+  const server = await createServer({
+    server: { middlewareMode: true, hmr: false }, appType: 'custom',
+    plugins: [{
+      name: 'observation-list-state-test', enforce: 'pre',
+      resolveId(id) { if (id === 'observation-list-hooks') return hooksId },
+      load(id) {
+        if (id === hooksId) return `
+          let slots = [], cursor = 0, dirty = false;
+          export function begin() { cursor = 0; dirty = false; }
+          export function pending() { return dirty; }
+          export function useEffect() {}
+          export function useState(initial) {
+            const index = cursor++;
+            if (!(index in slots)) slots[index] = initial;
+            return [slots[index], value => { slots[index] = value; dirty = true; }];
+          }
+        `
+      },
+      transform(source, id) {
+        if (/\/features\/medicalrecord\/(ObservationsSection|EncountersSection|DiagnosesSection|ClinicalNotesSection)\.tsx$/.test(id)) {
+          return source.replace("from 'react'", "from 'observation-list-hooks'")
+        }
+      },
+    }],
+  })
+  try {
+    const hooks = await server.ssrLoadModule('observation-list-hooks')
+    const { ObservationListView } = await server.ssrLoadModule('/src/features/medicalrecord/ObservationsSection.tsx')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const observations = Array.from({ length: 12 }, (_, index) => ({
+      id: `o-${index}`, status: 'final', code: { text: `Synthetic ${index}`, coding: [] },
+      value: null, dataAbsentReason: null, components: [], effective: null, issued: null,
+    }))
+    let tree: unknown
+    function render(items = observations, patientKey = 'patient-a', complete = false) {
+      do {
+        hooks.begin()
+        tree = ObservationListView({ state: { status: 'loaded', observations: items, complete, excludedCount: complete ? 0 : 1 }, patientKey })
+      } while (hooks.pending())
+      return renderToStaticMarkup(tree as Parameters<typeof renderToStaticMarkup>[0])
+    }
+    function toggle(node: unknown = tree): boolean {
+      if (Array.isArray(node)) return node.some((child) => toggle(child))
+      if (!node || typeof node !== 'object') return false
+      const props = (node as { props?: { children?: unknown; onClick?: () => void } }).props
+      if (props?.onClick && (props.children === 'Show All' || props.children === 'Show Less')) {
+        props.onClick(); return true
+      }
+      return toggle(props?.children)
+    }
+    const count = (html: string) => (html.match(/class="note-card"/g) ?? []).length
+    for (const size of [0, 10]) {
+      const html = render(observations.slice(0, size), 'patient-a', true)
+      assert.equal(count(html), size)
+      assert.doesNotMatch(html, /Show All|Show Less/)
+    }
+    const eleven = observations.slice(0, 11)
+    assert.equal(count(render(eleven)), 10)
+    assert.equal(toggle(), true)
+    assert.equal(count(render(eleven)), 11)
+    assert.match(render(eleven), /Show Less/)
+    let html = render()
+    assert.equal(count(html), 10)
+    assert.match(html, /aria-expanded="false"/)
+    assert.match(html, /This list is incomplete/)
+    toggle()
+    html = render()
+    assert.equal(count(html), 12)
+    assert.match(html, /aria-expanded="true"/)
+    assert.match(html, /This list is incomplete/)
+    assert.ok(html.indexOf('Synthetic 2') < html.indexOf('Synthetic 10'))
+    toggle()
+    assert.equal(count(render()), 10)
+    toggle()
+    assert.equal(count(render()), 12)
+    assert.equal(count(render(observations, 'patient-b')), 10)
+    assert.deepEqual(observations.map((item) => item.id), Array.from({ length: 12 }, (_, index) => `o-${index}`))
+    assert.equal(count(render(observations, '')), 10)
+    toggle()
+    assert.equal(count(render(observations, '')), 12)
+    for (const [file, view, field] of [
+      ['EncountersSection', 'EncounterListView', 'encounters'],
+      ['DiagnosesSection', 'DiagnosisListView', 'diagnoses'],
+      ['ClinicalNotesSection', 'ClinicalNoteListView', 'notes'],
+    ]) {
+      const module = await server.ssrLoadModule(`/src/features/medicalrecord/${file}.tsx`)
+      const items = Array.from({ length: 12 }, (_, index) => ({
+        id: `synthetic-${index}`, type: `Synthetic ${index}`, diagnosis: `Synthetic ${index}`, content: `Synthetic ${index}`,
+        status: 'finished', start: null, practitioners: [], organization: null, location: null,
+        clinicalStatus: null, verificationStatus: null, code: null, recordedDate: null, onset: null,
+        category: null, recorder: null, encounter: null, author: null, createdAt: null, contentAvailable: true,
+      }))
+      function renderSection(dataset = items, patientKey = 'patient-a') {
+        do {
+          hooks.begin()
+          tree = module[view]({ state: { status: 'loaded', [field]: dataset, complete: false, excludedCount: 1 },
+            emptyText: 'No records', patientKey })
+        } while (hooks.pending())
+        return renderToStaticMarkup(tree as Parameters<typeof renderToStaticMarkup>[0])
+      }
+      const rows = (html: string) => field === 'encounters' ? Math.max(0, (html.match(/<tr>/g) ?? []).length - 1) : count(html)
+      for (const size of [0, 10]) {
+        const html = renderSection(items.slice(0, size))
+        assert.equal(rows(html), size)
+        assert.doesNotMatch(html, /Show All|Show Less/)
+      }
+      const elevenItems = items.slice(0, 11)
+      assert.equal(rows(renderSection(elevenItems)), 10)
+      assert.equal(toggle(), true)
+      assert.equal(rows(renderSection(elevenItems)), 11)
+      assert.equal(rows(renderSection()), 10)
+      toggle()
+      let html = renderSection()
+      assert.equal(rows(html), 12)
+      assert.match(html, /Show Less/)
+      assert.match(html, /aria-expanded="true"/)
+      assert.ok(html.indexOf('Synthetic 2') < html.indexOf('Synthetic 10'))
+      if (field === 'encounters') assert.match(html, /This list is incomplete/)
+      toggle()
+      html = renderSection()
+      assert.equal(rows(html), 10)
+      if (field === 'encounters') assert.match(html, /This list is incomplete/)
+      toggle()
+      assert.equal(rows(renderSection()), 12)
+      assert.equal(rows(renderSection(items, 'patient-b')), 10)
+      assert.equal(rows(renderSection(items, '')), 10)
+      toggle()
+      assert.equal(rows(renderSection(items, '')), 12)
+      assert.deepEqual(items.map(item => item.id), Array.from({ length: 12 }, (_, index) => `synthetic-${index}`))
+    }
+
+  } finally { await server.close() }
+})

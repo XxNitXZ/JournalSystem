@@ -16,13 +16,18 @@ export type NoteListState = { status: 'loading' } | { status: 'failed'; message:
  * The notes, newest first as delivered by MediCore, with date, author, visit and text. The text is rendered as plain
  * text (React escapes it; line breaks are kept by CSS), never as HTML or Markdown. Exported for tests.
  */
-export function ClinicalNoteListView({ state, emptyText }: { state: NoteListState; emptyText: string }) {
+export function ClinicalNoteListView({ state, emptyText, patientKey }: { state: NoteListState; emptyText: string; patientKey?: string }) {
+  const items = state.status === 'loaded' ? state.notes : null
+  const [display, setDisplay] = useState({ items, patientKey, expanded: false })
+  const changed = display.items !== items || display.patientKey !== patientKey
+  if (changed) setDisplay({ items, patientKey, expanded: false })
+  const expanded = !changed && display.expanded
   if (state.status === 'loading') return <LoadingState label="Loading clinical notes…" />
   if (state.status === 'failed') return <Alert tone="error" role="alert">{state.message}</Alert>
   if (state.notes.length === 0) return <p className="muted">{emptyText}</p>
   return (
-    <ol className="note-list" aria-label="Clinical notes, most recent first">
-      {state.notes.map((note) => {
+    <><ol className="note-list" aria-label="Clinical notes, most recent first">
+      {(expanded ? state.notes : state.notes.slice(0, 10)).map((note) => {
         const status = noteStatusLabel(note.status)
         return (
           <li key={note.id} className="note-card">
@@ -41,6 +46,11 @@ export function ClinicalNoteListView({ state, emptyText }: { state: NoteListStat
         )
       })}
     </ol>
+      {state.notes.length > 10 && <button type="button" className="btn btn--ghost btn--sm"
+        aria-expanded={expanded} onClick={() => setDisplay({ items, patientKey, expanded: !expanded })}>
+        {expanded ? 'Show Less' : 'Show All'}
+      </button>}
+    </>
   )
 }
 
@@ -108,7 +118,7 @@ function ClinicalNotesSection({ load, createFor, emptyText = 'No clinical notes 
           }} />
       )}
       <Alert tone="success" role="status">{success}</Alert>
-      <ClinicalNoteListView state={state} emptyText={emptyText} />
+      <ClinicalNoteListView state={state} emptyText={emptyText} patientKey={createFor} />
     </Card>
   )
 }

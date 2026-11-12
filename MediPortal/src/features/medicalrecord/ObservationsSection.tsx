@@ -12,7 +12,12 @@ export type ObservationListState = { status: 'loading' } | { status: 'failed'; m
 function result(item: ObservationComponent): string {
   return item.value ? observationValue(item.value) : item.dataAbsentReason ? `Not measured: ${observationConcept(item.dataAbsentReason)}` : 'Not recorded'
 }
-export function ObservationListView({ state }: { state: ObservationListState }) {
+export function ObservationListView({ state, patientKey }: { state: ObservationListState; patientKey?: string }) {
+  const observations = state.status === 'loaded' ? state.observations : null
+  const [display, setDisplay] = useState({ observations, patientKey, expanded: false })
+  const changed = display.observations !== observations || display.patientKey !== patientKey
+  if (changed) setDisplay({ observations, patientKey, expanded: false })
+  const expanded = !changed && display.expanded
   if (state.status === 'loading') return <LoadingState label="Loading observations…" />
   if (state.status === 'failed') return <Alert tone="error" role="alert">{state.message}</Alert>
   const warning = !state.complete && <Alert tone="info" role="alert">
@@ -20,7 +25,7 @@ export function ObservationListView({ state }: { state: ObservationListState }) 
   </Alert>
   if (!state.observations.length) return <>{warning}<p className="muted">{state.complete
     ? 'No observations have been recorded yet.' : 'No valid observations could be displayed.'}</p></>
-  return <>{warning}<ul className="note-list" aria-label="Observations">{state.observations.map((item) => <li className="note-card" key={item.id}>
+  return <>{warning}<ul className="note-list" aria-label="Observations">{(expanded ? state.observations : state.observations.slice(0, 10)).map((item) => <li className="note-card" key={item.id}>
     <h3>{observationConcept(item.code)}</h3>
     <dl className="import-card__details">
       <div><dt>Status</dt><dd>{item.status}</dd></div>
@@ -30,7 +35,12 @@ export function ObservationListView({ state }: { state: ObservationListState }) 
     </dl>
     {item.components.length > 0 && <ul aria-label="Observation components">{item.components.map((component, index) =>
       <li key={index}>{observationConcept(component.code)}: {result(component)}</li>)}</ul>}
-  </li>)}</ul></>
+  </li>)}</ul>
+    {state.observations.length > 10 && <button type="button" className="btn btn--ghost btn--sm"
+      aria-expanded={expanded} onClick={() => setDisplay({ observations, patientKey, expanded: !expanded })}>
+      {expanded ? 'Show Less' : 'Show All'}
+    </button>}
+  </>
 }
 
 export default function ObservationsSection({ load, createFor, initialState, initiallyCreating = false }: {
@@ -59,6 +69,6 @@ export default function ObservationsSection({ load, createFor, initialState, ini
       onCreated={() => { setCreating(false); setSuccess('The observation was recorded.'); refresh() }} />}
     <Alert tone="success" role="status">{success}</Alert>
     {success && state.status === 'failed' && <Alert tone="info" role="status">The observation was saved, but the list could not be refreshed. Do not record it again.</Alert>}
-    <ObservationListView state={state} />
+    <ObservationListView state={state} patientKey={createFor} />
   </Card>
 }

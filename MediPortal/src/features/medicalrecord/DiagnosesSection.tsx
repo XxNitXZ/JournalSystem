@@ -30,13 +30,18 @@ const clinicalTones: Record<string, 'success' | 'warning' | 'neutral' | 'danger'
  * The diagnoses, newest first as delivered by MediCore: diagnosis, code, statuses, dates, encounter and recorder.
  * Values that a Condition recorded elsewhere does not have are left out or shown as "Not recorded". Exported for tests.
  */
-export function DiagnosisListView({ state, emptyText }: { state: DiagnosisListState; emptyText: string }) {
+export function DiagnosisListView({ state, emptyText, patientKey }: { state: DiagnosisListState; emptyText: string; patientKey?: string }) {
+  const items = state.status === 'loaded' ? state.diagnoses : null
+  const [display, setDisplay] = useState({ items, patientKey, expanded: false })
+  const changed = display.items !== items || display.patientKey !== patientKey
+  if (changed) setDisplay({ items, patientKey, expanded: false })
+  const expanded = !changed && display.expanded
   if (state.status === 'loading') return <LoadingState label="Loading diagnoses…" />
   if (state.status === 'failed') return <Alert tone="error" role="alert">{state.message}</Alert>
   if (state.diagnoses.length === 0) return <p className="muted">{emptyText}</p>
   return (
-    <ul className="note-list" aria-label="Diagnoses, most recently recorded first">
-      {state.diagnoses.map((diagnosis) => {
+    <><ul className="note-list" aria-label="Diagnoses, most recently recorded first">
+      {(expanded ? state.diagnoses : state.diagnoses.slice(0, 10)).map((diagnosis) => {
         const clinical = formatClinicalStatus(diagnosis.clinicalStatus)
         const verification = formatVerificationStatus(diagnosis.verificationStatus)
         const code = diagnosis.diagnosis ? formatDiagnosisCode(diagnosis.code) : null
@@ -62,6 +67,11 @@ export function DiagnosisListView({ state, emptyText }: { state: DiagnosisListSt
         )
       })}
     </ul>
+      {state.diagnoses.length > 10 && <button type="button" className="btn btn--ghost btn--sm"
+        aria-expanded={expanded} onClick={() => setDisplay({ items, patientKey, expanded: !expanded })}>
+        {expanded ? 'Show Less' : 'Show All'}
+      </button>}
+    </>
   )
 }
 
@@ -130,7 +140,7 @@ function DiagnosesSection({ load, createFor, emptyText = 'No diagnoses have been
           }} />
       )}
       <Alert tone="success" role="status">{success}</Alert>
-      <DiagnosisListView state={state} emptyText={emptyText} />
+      <DiagnosisListView state={state} emptyText={emptyText} patientKey={createFor} />
     </Card>
   )
 }

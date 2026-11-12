@@ -19,7 +19,12 @@ const statusTones: Record<string, 'success' | 'warning' | 'neutral'> = {
 }
 
 /** The visits, newest first as delivered by MediCore; loading, error and empty states. Exported for tests. */
-export function EncounterListView({ state, emptyText }: { state: EncounterListState; emptyText: string }) {
+export function EncounterListView({ state, emptyText, patientKey }: { state: EncounterListState; emptyText: string; patientKey?: string }) {
+  const items = state.status === 'loaded' ? state.encounters : null
+  const [display, setDisplay] = useState({ items, patientKey, expanded: false })
+  const changed = display.items !== items || display.patientKey !== patientKey
+  if (changed) setDisplay({ items, patientKey, expanded: false })
+  const expanded = !changed && display.expanded
   if (state.status === 'loading') return <LoadingState label="Loading encounters…" />
   if (state.status === 'failed') return <Alert tone="error" role="alert">{state.message}</Alert>
   const warning = !state.complete && <Alert tone="info" role="alert">This list is incomplete. {state.excludedCount} encounters were excluded because source records are invalid.</Alert>
@@ -38,7 +43,7 @@ export function EncounterListView({ state, emptyText }: { state: EncounterListSt
           </tr>
         </thead>
         <tbody>
-          {state.encounters.map((encounter) => (
+          {(expanded ? state.encounters : state.encounters.slice(0, 10)).map((encounter) => (
             <tr key={encounter.id}>
               <td className="data-table__date">{formatVisitDate(encounter.start)}</td>
               <td>{encounter.practitioners.length ? encounter.practitioners.join(', ') : 'Not recorded'}</td>
@@ -51,7 +56,12 @@ export function EncounterListView({ state, emptyText }: { state: EncounterListSt
           ))}
         </tbody>
       </table>
-    </div></>
+    </div>
+      {state.encounters.length > 10 && <button type="button" className="btn btn--ghost btn--sm"
+        aria-expanded={expanded} onClick={() => setDisplay({ items, patientKey, expanded: !expanded })}>
+        {expanded ? 'Show Less' : 'Show All'}
+      </button>}
+    </>
   )
 }
 
@@ -108,7 +118,7 @@ function EncountersSection({ load, createFor, emptyText = 'No encounters have be
           }} />
       )}
       <Alert tone="success" role="status">{success}</Alert>
-      <EncounterListView state={state} emptyText={emptyText} />
+      <EncounterListView state={state} emptyText={emptyText} patientKey={createFor} />
     </Card>
   )
 }
