@@ -1,20 +1,12 @@
 import { useEffect, useState } from 'react'
 import { getHealth } from '../../services/healthService'
-import { ApiError } from '../../services/apiClient'
 
 type BackendState =
   | { kind: 'loading' }
   | { kind: 'online' }
-  | { kind: 'offline'; reason: string }
+  | { kind: 'offline' }
 
-function describeError(error: unknown): string {
-  if (error instanceof ApiError) {
-    return `HTTP ${error.status}`
-  }
-
-  return 'not reachable'
-}
-
+/** MediCore backend availability, checked on mount and every 30 seconds (5-second timeout per check). */
 function BackendStatus() {
   const [state, setState] = useState<BackendState>({ kind: 'loading' })
 
@@ -24,7 +16,7 @@ function BackendStatus() {
     let timeoutId: ReturnType<typeof setTimeout> | undefined
 
     async function checkBackend() {
-      // Avbryt eventuellt tidigare anrop
+      // Cancel a previous check that is still running.
       activeController?.abort()
 
       if (timeoutId !== undefined) {
@@ -36,7 +28,7 @@ function BackendStatus() {
 
       let timedOut = false
 
-      // Avbryt anropet om backend inte svarar inom 5 sekunder
+      // Give up if the backend does not answer within 5 seconds.
       const currentTimeoutId = setTimeout(() => {
         timedOut = true
         controller.abort()
@@ -56,26 +48,16 @@ function BackendStatus() {
         if (health && health.status === 'UP') {
           setState({ kind: 'online' })
         } else {
-          setState({
-            kind: 'offline',
-            reason: 'unexpected response',
-          })
+          setState({ kind: 'offline' })
         }
-      } catch (error: unknown) {
+      } catch {
         if (unmounted) {
           return
         }
 
-        if (timedOut) {
-          setState({
-            kind: 'offline',
-            reason: 'timeout',
-          })
-        } else if (!controller.signal.aborted) {
-          setState({
-            kind: 'offline',
-            reason: describeError(error),
-          })
+        // A timeout aborts the request too; any other abort means a newer check replaced this one.
+        if (timedOut || !controller.signal.aborted) {
+          setState({ kind: 'offline' })
         }
       } finally {
         clearTimeout(currentTimeoutId)
@@ -90,15 +72,13 @@ function BackendStatus() {
       }
     }
 
-    // Kontrollera backend direkt när komponenten monteras
+    // Check immediately, then every 30 seconds.
     void checkBackend()
 
-    // Kontrollera sedan automatiskt var 30:e sekund
     const intervalId = setInterval(() => {
       void checkBackend()
     }, 30000)
 
-    // Cleanup när komponenten avmonteras
     return () => {
       unmounted = true
 
@@ -113,7 +93,7 @@ function BackendStatus() {
   }, [])
 
   return (
-    <div
+    <p
       className="status"
       role="status"
       aria-busy={state.kind === 'loading'}
@@ -124,12 +104,11 @@ function BackendStatus() {
       />
 
       <span>
-        {state.kind === 'loading' && 'Backend: checking connection…'}
-        {state.kind === 'online' && 'Backend: Online'}
-        {state.kind === 'offline' &&
-          `Backend: Offline (${state.reason})`}
+        {state.kind === 'loading' && 'Checking whether MediCore is available…'}
+        {state.kind === 'online' && 'MediCore is available.'}
+        {state.kind === 'offline' && 'MediCore is temporarily unavailable. Please try again later.'}
       </span>
-    </div>
+    </p>
   )
 }
 

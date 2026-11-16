@@ -11,7 +11,9 @@ for Windows (PowerShell) and macOS (bash).
 | Frontend  | `medinexus-mediportal` | `medinexus-mediportal:local` | `mediportal/start-mediportal.ps1` / `.sh` |
 
 PostgreSQL details (password, volume, Flyway baseline, troubleshooting) are in
-[database/README.md](database/README.md).
+[database/README.md](database/README.md). Which data PostgreSQL owns and which
+the external FHIR server owns is described in
+[DATA_OWNERSHIP.md](DATA_OWNERSHIP.md).
 
 ## Architecture
 
@@ -240,6 +242,32 @@ over `.env` and the Docker script stops. Remove it for that terminal
 cannot use port 8080 at the same time.
 
 ## Environment variables
+
+### Authentication sessions
+
+MediCore uses in-memory HTTP sessions with HttpOnly, SameSite=Lax cookies and a
+30-minute inactivity timeout. Restarting MediCore ends existing sessions. Set
+`SESSION_COOKIE_SECURE=true` when serving the API over HTTPS.
+
+Browser clients calling the API across origins must use `credentials: 'include'`.
+Only the configured `MEDINEXUS_CORS_ALLOWED_ORIGINS` may make credentialed calls.
+
+1. Call `GET /api/auth/csrf` to obtain `token` and `headerName`, retaining the
+   session cookie. Send that token in the named header for POST requests,
+   including registration, login, and logout. Missing or invalid tokens return 403.
+2. Call `POST /api/auth/login` with JSON `email` and `password`. Success returns
+   200 with `id`, `email`, and `role`, and rotates the session ID. Invalid
+   credentials return an empty 401 response. Malformed JSON returns 400.
+3. Fetch a new CSRF token after login. `GET /api/auth/me` returns the same user
+   summary, or 401 without an authenticated session.
+4. Call `POST /api/auth/logout` with a valid CSRF token. It returns 204,
+   invalidates the session, and expires the session cookie. Bootstrap a new CSRF
+   token before further writes.
+
+Registration retains its request and response formats and 201/400/409 behavior
+when supplied with a valid CSRF token. Frontend CSRF integration is separate work.
+
+### Container settings
 
 | Variable | Used by | When | Value |
 |----------|---------|------|-------|
