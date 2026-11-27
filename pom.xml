@@ -28,6 +28,8 @@
         <module>services/common</module>
         <!-- The Lab 1 application, unchanged; split into identity/clinical/messaging in EPIC-02. -->
         <module>services/monolith</module>
+        <!-- Accounts, login and journal access (US-02.01). -->
+        <module>services/identity</module>
     </modules>
 
     <properties>

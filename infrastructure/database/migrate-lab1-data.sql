@@ -11,7 +11,7 @@
 --
 -- Run it as the database owner, who can read `public` and write every service schema:
 --
---   docker exec -i medinexus-postgres psql -U medinexus -d medinexus_db -v ON_ERROR_STOP=1 \
+--   docker exec -i -e PGPASSWORD="$DB_PASSWORD" medinexus-postgres psql -U medinexus -d medinexus_db -v ON_ERROR_STOP=1 \
 --     < infrastructure/database/migrate-lab1-data.sql
 --
 -- Everything runs in one transaction. It stops without changing anything if a table is missing, if a target table

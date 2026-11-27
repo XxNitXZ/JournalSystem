@@ -181,7 +181,7 @@ Each user's `search_path` is its own schema, so the services use unqualified tab
 | File | What it does | When |
 |---|---|---|
 | `init-schemas.sql` | Creates the 3 users (passwords passed in), their schemas and their rights. Safe to run again | Once per database, before the services first start |
-| `migrations/<service>/V1__baseline.sql` | Each service's first Flyway migration: its tables exactly as after Lab 1's V1–V10, minus the cross-schema foreign keys (§3) and `persistence_check` | Moved into each service by NIT-788; run by that service's Flyway on first start |
+| `migrations/<service>/V1__baseline.sql` (Identity's is already in `services/identity/src/main/resources/db/migration/`) | Each service's first Flyway migration: its tables exactly as after Lab 1's V1–V10, minus the cross-schema foreign keys (§3) and `persistence_check` | Moved into each service when it is created (NIT-329, NIT-332, NIT-335); run by that service's Flyway on first start |
 | `migrate-lab1-data.sql` | One-off copy of all Lab 1 rows (ids kept) into the new schemas, plus linked patients into the registry (D5). One transaction; checks row counts; refuses to run twice | Once, at the EPIC-02 cut-over: after each service has started once, with the monolith stopped |
 
 `journal_access_requests.fhir_patient_id` lost its foreign key, so it got the same format check as
@@ -389,7 +389,8 @@ pom.xml                       parent: Spring Boot and dependency versions, modul
 services/
   common/                     medicore-common (jar + test-jar): code every Spring service shares
   monolith/                   MediCore: the Lab 1 app, unchanged; removed at the EPIC-02 cut-over
-  identity/ clinical/ messaging/   added in EPIC-02 (NIT-329, NIT-332, NIT-335)
+  identity/                   Identity service, port 8081 (NIT-329; code moves in NIT-330)
+  clinical/ messaging/        added in EPIC-02 (NIT-332, NIT-335)
 MediPortal/                   React frontend (npm, not part of the Maven build)
 infrastructure/  docs/
 ```
@@ -413,7 +414,7 @@ tests check tokens and error bodies the same way.
 |---|---|
 | Build and test everything | `./mvnw clean verify` |
 | Build one service plus what it needs | `./mvnw -pl services/monolith -am package` |
-| Run a service | `./mvnw -pl services/monolith -am spring-boot:run` |
+| Run a service | `./mvnw -pl services/monolith -am spring-boot:run` (or `services/identity`, …) |
 | One test class | `./mvnw test -Dtest=AuthenticationControllerTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | Docker image | `docker build -f infrastructure/medicore/Dockerfile -t medinexus-medicore:local .` |
 

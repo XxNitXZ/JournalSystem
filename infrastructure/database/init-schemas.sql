@@ -7,7 +7,7 @@
 --
 -- Run once per database as the database owner (`medinexus`), with one password per service user:
 --
---   docker exec -i medinexus-postgres psql -U medinexus -d medinexus_db -v ON_ERROR_STOP=1 \
+--   docker exec -i -e PGPASSWORD="$DB_PASSWORD" medinexus-postgres psql -U medinexus -d medinexus_db -v ON_ERROR_STOP=1 \
 --     -v identity_password='…' -v clinical_password='…' -v messaging_password='…' \
 --     < infrastructure/database/init-schemas.sql
 --
