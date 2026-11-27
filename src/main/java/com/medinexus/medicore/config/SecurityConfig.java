@@ -1,5 +1,7 @@
 package com.medinexus.medicore.config;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.springframework.context.annotation.Bean;
@@ -7,6 +9,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.ProviderManager;
@@ -24,12 +28,14 @@ import org.springframework.security.web.servlet.util.matcher.PathPatternRequestM
 
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.service.AuthenticationService;
+import com.medinexus.medicore.common.exception.ApiError;
 import com.medinexus.medicore.security.jwt.CookieBearerTokenResolver;
 import com.medinexus.medicore.security.jwt.JwtPrincipalConverter;
 import com.medinexus.medicore.security.jwt.JwtSecurityConfig;
 import com.medinexus.medicore.security.jwt.JwtTokenService;
 
 import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Stateless security (NIT-327): no HTTP session. Every request is authenticated by the signed JWT in the
@@ -78,9 +84,8 @@ public class SecurityConfig {
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .bearerTokenResolver(tokenResolver)
                         .jwt(jwt -> jwt.authenticationManager(jwtAuthentication))
-                        // Plain status codes without a body, as before.
-                        .authenticationEntryPoint((request, response, exception) -> response.setStatus(401))
-                        .accessDeniedHandler((request, response, exception) -> response.setStatus(403)))
+                        .authenticationEntryPoint((request, response, exception) -> writeError(response, 401))
+                        .accessDeniedHandler((request, response, exception) -> writeError(response, 403)))
                 .authorizeHttpRequests(authorize -> authorize
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register", "/api/auth/logout")
@@ -145,8 +150,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PATCH, "/api/patients/*").hasAnyRole("DOCTOR", "STAFF")
                         .anyRequest().denyAll())
                 .exceptionHandling(errors -> errors
-                        .authenticationEntryPoint((request, response, exception) -> response.setStatus(401))
-                        .accessDeniedHandler((request, response, exception) -> response.setStatus(403)))
+                        .authenticationEntryPoint((request, response, exception) -> writeError(response, 401))
+                        .accessDeniedHandler((request, response, exception) -> writeError(response, 403)))
                 // Logout overwrites the token cookie with an expired one. POST only: without CSRF protection Spring
                 // would otherwise accept any method.
                 .logout(logout -> logout
@@ -156,5 +161,16 @@ public class SecurityConfig {
                                 response.addHeader(HttpHeaders.SET_COOKIE, tokens.clearedCookie().toString()))
                         .logoutSuccessHandler((request, response, authentication) -> response.setStatus(204)))
                 .build();
+    }
+
+    /**
+     * Writes the common {@link ApiError} body for a 401 or 403 decided by the security filters, which run before
+     * Spring MVC and its {@code @ExceptionHandler}s (NIT-328).
+     */
+    static void writeError(HttpServletResponse response, int status) throws IOException {
+        response.setStatus(status);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.getWriter().write(ApiError.of(HttpStatusCode.valueOf(status)).toJson());
     }
 }

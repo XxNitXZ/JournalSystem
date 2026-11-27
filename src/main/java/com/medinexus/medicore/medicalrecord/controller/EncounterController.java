@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.medinexus.medicore.common.exception.ApiError;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.fhir.client.FhirServerException;
 import com.medinexus.medicore.medicalrecord.dto.EncounterSummaryDto;
@@ -63,34 +64,34 @@ public class EncounterController {
     }
 
     @ExceptionHandler(EncounterRequestException.class)
-    public ResponseEntity<Map<String, String>> rejected(EncounterRequestException rejected) {
-        return ResponseEntity.status(rejected.status()).body(Map.of("code", rejected.code()));
+    public ResponseEntity<ApiError> rejected(EncounterRequestException rejected) {
+        return ApiError.response(rejected.status(), rejected.code());
     }
 
     @ExceptionHandler(PatientNotFoundException.class)
-    public ResponseEntity<Void> notFound() {
-        return ResponseEntity.notFound().build();
+    public ResponseEntity<ApiError> notFound() {
+        return ApiError.response(HttpStatus.NOT_FOUND);
     }
 
     /** Malformed Patient ID or unreadable JSON (whose message may contain submitted values). */
     @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})
-    public ResponseEntity<Void> invalid() {
-        return ResponseEntity.badRequest().build();
+    public ResponseEntity<ApiError> invalid() {
+        return ApiError.response(HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Void> denied() {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+    public ResponseEntity<ApiError> denied() {
+        return ApiError.response(HttpStatus.FORBIDDEN);
     }
 
     /** Already logged safely by FhirRequestExecutor. */
     @ExceptionHandler(FhirServerException.class)
-    public ResponseEntity<Void> fhirFailure(FhirServerException failure) {
+    public ResponseEntity<ApiError> fhirFailure(FhirServerException failure) {
         HttpStatus status = switch (failure.type()) {
             case TIMEOUT, UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
             case CLIENT_ERROR -> HttpStatus.UNPROCESSABLE_CONTENT;
             case INVALID_RESPONSE, SERVER_ERROR -> HttpStatus.BAD_GATEWAY;
         };
-        return ResponseEntity.status(status).build();
+        return ApiError.response(status);
     }
 }

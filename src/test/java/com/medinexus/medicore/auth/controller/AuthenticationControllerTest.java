@@ -1,5 +1,7 @@
 package com.medinexus.medicore.auth.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static com.medinexus.medicore.security.jwt.TestTokens.account;
 import static com.medinexus.medicore.security.jwt.TestTokens.tokenCookie;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -157,7 +159,7 @@ class AuthenticationControllerTest {
         when(service.authenticate("user@example.com", "a secure password"))
                 .thenThrow(new IllegalArgumentException(message));
         MvcResult result = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN))
-                .andExpect(status().isUnauthorized()).andExpect(content().string("")).andReturn();
+                .andExpect(status().isUnauthorized()).andExpect(genericError()).andReturn();
         assertThat(tokenCookie(result)).isNull();
     }
 

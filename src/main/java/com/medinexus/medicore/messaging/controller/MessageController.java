@@ -3,6 +3,7 @@ package com.medinexus.medicore.messaging.controller;
 import java.util.Map;
 import java.util.List;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.medinexus.medicore.common.exception.ApiError;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.messaging.dto.MessageSentResponse;
 import com.medinexus.medicore.messaging.dto.MessageInboxResponse;
@@ -75,11 +77,11 @@ public class MessageController {
     }
 
     @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})
-    public ResponseEntity<Void> invalid() { return ResponseEntity.badRequest().build(); }
+    public ResponseEntity<ApiError> invalid() { return ApiError.response(HttpStatus.BAD_REQUEST); }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Void> denied() { return ResponseEntity.status(403).build(); }
+    public ResponseEntity<ApiError> denied() { return ApiError.response(403); }
 
     @ExceptionHandler(MessageRecipientNotFoundException.class)
-    public ResponseEntity<Void> notFound() { return ResponseEntity.notFound().build(); }
+    public ResponseEntity<ApiError> notFound() { return ApiError.response(HttpStatus.NOT_FOUND); }
 }

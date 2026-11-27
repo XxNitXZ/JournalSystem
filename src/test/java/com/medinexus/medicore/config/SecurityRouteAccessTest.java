@@ -1,5 +1,6 @@
 package com.medinexus.medicore.config;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -94,7 +95,8 @@ class SecurityRouteAccessTest {
 
     @Test
     void meRejectsAnonymousRequests() throws Exception {
-        mvc.perform(get("/api/auth/me")).andExpect(status().isUnauthorized());
+        // The security filter's 401 uses the same error body as every controller (NIT-328).
+        mvc.perform(get("/api/auth/me")).andExpect(status().isUnauthorized()).andExpect(genericError());
     }
 
     @ParameterizedTest
@@ -118,7 +120,7 @@ class SecurityRouteAccessTest {
                         .with(authentication(UsernamePasswordAuthenticationToken.authenticated(
                                 new UserDto(42L, "user@example.com", role), null,
                                 List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))))))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden()).andExpect(genericError());
     }
 
     private static Stream<Arguments> deniedRequestsForEveryRole() {

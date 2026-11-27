@@ -1,5 +1,7 @@
 package com.medinexus.medicore.messaging.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -81,7 +83,7 @@ class MessageControllerTest {
         account(1L, Role.PATIENT);
         mvc.perform(post("/api/messages").with(signedIn(Role.PATIENT)).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isBadRequest()).andExpect(content().string(""));
+                .andExpect(status().isBadRequest()).andExpect(genericError());
         verifyNoInteractions(messages);
     }
 
@@ -190,7 +192,7 @@ class MessageControllerTest {
     void stalePatientSessionCannotDiscoverRecipients(Role role) throws Exception {
         account(1L, role);
         mvc.perform(get("/api/messages/recipients").with(signedIn(Role.PATIENT)))
-                .andExpect(status().isForbidden()).andExpect(content().string(""));
+                .andExpect(status().isForbidden()).andExpect(genericError());
         org.mockito.Mockito.verify(users, org.mockito.Mockito.never()).findByRoleIn(any());
     }
 
@@ -219,7 +221,7 @@ class MessageControllerTest {
     private void rejected(String body, int status) throws Exception {
         mvc.perform(post("/api/messages").with(signedIn(Role.PATIENT)).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().is(status)).andExpect(content().string(""));
+                .andExpect(status().is(status)).andExpect(genericError());
         verifyNoInteractions(messages);
     }
 

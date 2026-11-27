@@ -6,6 +6,7 @@ import java.time.Clock;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,6 +18,7 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 
+import com.medinexus.medicore.common.http.ServiceClients;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 /**
@@ -56,6 +58,13 @@ public class JwtSecurityConfig {
     @Bean
     public JwtPrincipalConverter jwtPrincipalConverter() {
         return new JwtPrincipalConverter();
+    }
+
+    /** Clients for calls to other services, signed as {@code medinexus.service-name} (NIT-328). */
+    @Bean
+    public ServiceClients serviceClients(JwtTokenService tokens,
+            @Value("${medinexus.service-name:medicore}") String serviceName) {
+        return new ServiceClients(tokens, serviceName);
     }
 
     private static SecretKey signingKey(JwtProperties properties) {

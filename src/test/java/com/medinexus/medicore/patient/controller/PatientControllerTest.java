@@ -1,5 +1,7 @@
 package com.medinexus.medicore.patient.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -41,6 +43,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import com.medinexus.medicore.common.exception.ApiErrorMatchers;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.service.AuthenticationService;
@@ -194,7 +197,7 @@ class PatientControllerTest {
         when(patientService.getPatient(any(), any())).thenThrow(failure);
         mvc.perform(get("/api/patients/syn-profile-41").with(as(Role.DOCTOR)))
                 .andExpect(status().is(expectedStatus))
-                .andExpect(content().string(""));
+                .andExpect(genericError());
     }
 
     @Test
@@ -202,7 +205,7 @@ class PatientControllerTest {
         when(patientService.getPatient(user(Role.STAFF), "bad_id"))
                 .thenThrow(new IllegalArgumentException("A valid logical FHIR Patient ID is required"));
         mvc.perform(get("/api/patients/bad_id").with(as(Role.STAFF))).andExpect(status().isBadRequest())
-                .andExpect(content().string(""));
+                .andExpect(genericError());
     }
 
     @Test
@@ -221,7 +224,7 @@ class PatientControllerTest {
         mvc.perform(post("/api/patients").with(csrf()).with(as(Role.DOCTOR))
                         .contentType(MediaType.APPLICATION_JSON).content(BODY))
                 .andExpect(status().isForbidden())
-                .andExpect(content().string(""));
+                .andExpect(genericError());
     }
 
     static Stream<Arguments> failures() {
@@ -248,7 +251,7 @@ class PatientControllerTest {
         mvc.perform(post("/api/patients").with(csrf()).with(as(Role.STAFF))
                         .contentType(MediaType.APPLICATION_JSON).content(BODY))
                 .andExpect(status().is(expectedStatus))
-                .andExpect(content().string(""));
+                .andExpect(genericError());
     }
 
     @ParameterizedTest
@@ -263,7 +266,7 @@ class PatientControllerTest {
         mvc.perform(post("/api/patients").with(csrf()).with(as(Role.DOCTOR))
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().string(""));
+                .andExpect(genericError());
         verify(patientService, never()).registerPatient(any(), any());
         Assertions.assertThat(output.getAll().contains(PERSONNUMMER)).as("log contains the personnummer").isFalse();
         Assertions.assertThat(output.getAll().contains("1990-13-45")).as("log contains the input").isFalse();
@@ -289,8 +292,7 @@ class PatientControllerTest {
         mvc.perform(post("/api/patients").with(csrf()).with(as(Role.DOCTOR))
                         .contentType(MediaType.APPLICATION_JSON).content(BODY))
                 .andExpect(status().isInternalServerError())
-                .andExpect(content().json("{\"code\":\"REGISTRY_FAILED\"}",
-                        org.springframework.test.json.JsonCompareMode.STRICT));
+                .andExpect(apiError("REGISTRY_FAILED"));
     }
 
     // --- POST /api/patients/search ---
@@ -336,8 +338,7 @@ class PatientControllerTest {
         mvc.perform(post("/api/patients/search").with(csrf()).with(as(Role.STAFF))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"query\":\"" + PERSONNUMMER + "\"}"))
                 .andExpect(status().is(expectedStatus))
-                .andExpect(content().string(body.isEmpty() ? org.hamcrest.Matchers.emptyString()
-                        : org.hamcrest.Matchers.equalTo(body)));
+                .andExpect(body.isEmpty() ? genericError() : apiError(ApiErrorMatchers.codeIn(body)));
     }
 
     @Test
@@ -398,7 +399,7 @@ class PatientControllerTest {
                 .thenThrow(new com.medinexus.medicore.patient.service.OwnPatientRecordException(code));
         mvc.perform(get("/api/patients/me").with(as(Role.PATIENT)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"code\":\"" + code + "\"}", true));
+                .andExpect(apiError(code));
     }
 
     @Test
@@ -447,7 +448,7 @@ class PatientControllerTest {
         mvc.perform(patch("/api/patients/syn-profile-41").with(csrf()).with(as(Role.STAFF)).header("If-Match", "2")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().string(""));
+                .andExpect(genericError());
         verify(patientService, never()).updatePatient(any(), any(), any(), any());
     }
 
@@ -467,7 +468,7 @@ class PatientControllerTest {
         mvc.perform(patch("/api/patients/syn-profile-41").with(csrf()).with(as(Role.DOCTOR))
                         .contentType(MediaType.APPLICATION_JSON).content(UPDATE_BODY))
                 .andExpect(status().isPreconditionRequired())
-                .andExpect(content().json("{\"code\":\"VERSION_REQUIRED\"}", true));
+                .andExpect(apiError("VERSION_REQUIRED"));
         verify(patientService).updatePatient(user(Role.DOCTOR), "syn-profile-41", null, UPDATE);
 
         org.mockito.Mockito.reset(patientService);
@@ -475,7 +476,7 @@ class PatientControllerTest {
                 .thenThrow(new com.medinexus.medicore.patient.service.PatientVersionConflictException());
         mvc.perform(patch("/api/patients/syn-profile-41").with(csrf()).with(as(Role.DOCTOR)).header("If-Match", "1")
                         .contentType(MediaType.APPLICATION_JSON).content(UPDATE_BODY))
-                .andExpect(status().isConflict()).andExpect(content().json("{\"code\":\"VERSION_CONFLICT\"}", true));
+                .andExpect(status().isConflict()).andExpect(apiError("VERSION_CONFLICT"));
 
         for (RuntimeException failure : List.<RuntimeException>of(new PatientNotFoundException(),
                 new IllegalArgumentException("x"), new AccessDeniedException("x"),

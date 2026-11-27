@@ -1,5 +1,7 @@
 package com.medinexus.medicore.messaging.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -118,7 +120,7 @@ class PatientConversationsIntegrationTest {
         mvc.perform(get("/api/messages/conversations/" + doctor).with(as(maja, Role.PATIENT)))
                 .andExpect(status().isOk()).andExpect(content().json("[]"));
         mvc.perform(get("/api/messages/conversations/" + ebba).with(as(maja, Role.PATIENT)))
-                .andExpect(status().isForbidden()).andExpect(content().string(""));
+                .andExpect(status().isForbidden()).andExpect(genericError());
     }
 
     @Test

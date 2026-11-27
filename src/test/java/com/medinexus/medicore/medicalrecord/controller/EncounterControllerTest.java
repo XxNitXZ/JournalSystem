@@ -1,5 +1,7 @@
 package com.medinexus.medicore.medicalrecord.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -170,7 +172,7 @@ class EncounterControllerTest {
         mvc.perform(post("/api/patients/syn-patient-1/encounters").with(csrf()).with(as(Role.DOCTOR))
                         .contentType(MediaType.APPLICATION_JSON).content(BODY.replace("}", ",\"" + field + "\":\"x\"}")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"code\":\"INVALID_REQUEST\"}", JsonCompareMode.STRICT));
+                .andExpect(apiError("INVALID_REQUEST"));
         for (String body : List.of("{\"startTime\":1}", "[]", "{")) {
             mvc.perform(post("/api/patients/syn-patient-1/encounters").with(csrf()).with(as(Role.DOCTOR))
                     .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isBadRequest());
@@ -197,14 +199,14 @@ class EncounterControllerTest {
             when(service.create(any(), any(), any())).thenThrow(c.failure());
             var result = mvc.perform(post("/api/patients/syn-patient-1/encounters").with(csrf()).with(as(Role.STAFF))
                     .contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().is(c.status()));
-            if (c.code() != null) result.andExpect(content().json("{\"code\":\"" + c.code() + "\"}", JsonCompareMode.STRICT));
-            else result.andExpect(content().string(""));
+            if (c.code() != null) result.andExpect(apiError(c.code()));
+            else result.andExpect(genericError());
         }
         org.mockito.Mockito.reset(service);
         when(service.listOwn(any())).thenThrow(new EncounterRequestException("RECORD_NOT_LINKED"));
         mvc.perform(get("/api/patients/me/encounters").with(as(Role.PATIENT)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"code\":\"RECORD_NOT_LINKED\"}", JsonCompareMode.STRICT));
+                .andExpect(apiError("RECORD_NOT_LINKED"));
     }
 
     @Test

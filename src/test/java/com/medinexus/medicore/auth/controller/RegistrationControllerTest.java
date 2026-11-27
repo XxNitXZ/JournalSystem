@@ -1,5 +1,7 @@
 package com.medinexus.medicore.auth.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static com.medinexus.medicore.security.jwt.TestTokens.account;
 import static com.medinexus.medicore.security.jwt.TestTokens.tokenCookie;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -157,7 +159,7 @@ class RegistrationControllerTest {
                                 {"email":"patient@example.com","password":"a secure password","role":"PATIENT","givenName":"Anna","familyName":"Testsson","personnummer":"182003151236"}
                                 """))
                 .andExpect(status().isConflict())
-                .andExpect(content().string(""));
+                .andExpect(genericError());
     }
 
     // --- Automatic sign-in after registration (PATIENT only) ---
@@ -276,7 +278,7 @@ class RegistrationControllerTest {
                 new com.medinexus.medicore.auth.service.PersonnummerAlreadyRegisteredException());
         MvcResult result = mockMvc.perform(register(body(Role.PATIENT)))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"code\":\"PERSONNUMMER_TAKEN\"}", JsonCompareMode.STRICT)).andReturn();
+                .andExpect(apiError("PERSONNUMMER_TAKEN")).andReturn();
         assertThat(tokenCookie(result)).isNull();
         verifyNoInteractions(authenticationService);
     }

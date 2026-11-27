@@ -1,5 +1,6 @@
 package com.medinexus.medicore.auth.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
 import static com.medinexus.medicore.security.jwt.TestTokens.tokenCookie;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -120,7 +121,7 @@ class ProfileControllerTest {
         mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"" + field + "\":\"Changed\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"code\":\"FIELD_NOT_EDITABLE\"}", JsonCompareMode.STRICT));
+                .andExpect(apiError("FIELD_NOT_EDITABLE"));
         verify(repository, never()).updateEmail(anyLong(), anyString());
         verify(repository, never()).updatePhoneNumber(anyLong(), any());
     }
@@ -152,16 +153,16 @@ class ProfileControllerTest {
         mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"new@example.test\",\"currentPassword\":\"wrong\"}"))
                 .andExpect(status().isForbidden())
-                .andExpect(content().json("{\"code\":\"CURRENT_PASSWORD_INVALID\"}", JsonCompareMode.STRICT));
+                .andExpect(apiError("CURRENT_PASSWORD_INVALID"));
         when(repository.existsByEmail("taken@example.test")).thenReturn(true);
         mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"taken@example.test\",\"currentPassword\":\"" + PASSWORD + "\"}"))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"code\":\"EMAIL_TAKEN\"}", JsonCompareMode.STRICT));
+                .andExpect(apiError("EMAIL_TAKEN"));
         mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phoneNumber\":\"12\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"code\":\"PHONE_INVALID\"}", JsonCompareMode.STRICT));
+                .andExpect(apiError("PHONE_INVALID"));
         mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{")).andExpect(status().isBadRequest());
         verify(repository, never()).updateEmail(anyLong(), anyString());
@@ -192,12 +193,12 @@ class ProfileControllerTest {
                         .content("{\"currentPassword\":\"wrong\",\"newPassword\":\"New-Passw0rd\","
                                 + "\"confirmPassword\":\"New-Passw0rd\"}"))
                 .andExpect(status().isForbidden())
-                .andExpect(content().json("{\"code\":\"CURRENT_PASSWORD_INVALID\"}", JsonCompareMode.STRICT));
+                .andExpect(apiError("CURRENT_PASSWORD_INVALID"));
         mvc.perform(post("/api/auth/password").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"currentPassword\":\"" + PASSWORD
                                 + "\",\"newPassword\":\"New-Passw0rd\",\"confirmPassword\":\"Other\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"code\":\"PASSWORD_MISMATCH\"}", JsonCompareMode.STRICT));
+                .andExpect(apiError("PASSWORD_MISMATCH"));
         // The sign-in survives a password change (stateless tokens stay valid until they expire).
         mvc.perform(get("/api/auth/me").cookie(session)).andExpect(status().isOk());
     }

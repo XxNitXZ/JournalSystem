@@ -1,6 +1,5 @@
 package com.medinexus.medicore.auth.controller;
 
-import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.medinexus.medicore.common.exception.ApiError;
 import com.medinexus.medicore.auth.dto.RegistrationRequest;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.entity.Role;
@@ -93,18 +93,18 @@ public class RegistrationController {
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Void> invalidRegistration() {
-        return ResponseEntity.badRequest().build();
+    public ResponseEntity<ApiError> invalidRegistration() {
+        return ApiError.response(HttpStatus.BAD_REQUEST);
     }
 
     /** The personnummer belongs to another account; a code tells the client which field conflicts. */
     @ExceptionHandler(PersonnummerAlreadyRegisteredException.class)
-    public ResponseEntity<Map<String, String>> duplicatePersonnummer() {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("code", "PERSONNUMMER_TAKEN"));
+    public ResponseEntity<ApiError> duplicatePersonnummer() {
+        return ApiError.response(HttpStatus.CONFLICT, "PERSONNUMMER_TAKEN");
     }
 
     @ExceptionHandler(DuplicateKeyException.class)
-    public ResponseEntity<Void> duplicateEmail() {
-        return ResponseEntity.status(HttpStatus.CONFLICT).build();
+    public ResponseEntity<ApiError> duplicateEmail() {
+        return ApiError.response(HttpStatus.CONFLICT);
     }
 }

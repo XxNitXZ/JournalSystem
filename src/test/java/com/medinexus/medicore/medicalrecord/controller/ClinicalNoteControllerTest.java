@@ -1,5 +1,7 @@
 package com.medinexus.medicore.medicalrecord.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
@@ -34,6 +36,7 @@ import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import com.medinexus.medicore.common.exception.ApiErrorMatchers;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.service.AuthenticationService;
@@ -138,7 +141,7 @@ class ClinicalNoteControllerTest {
         mvc.perform(post("/api/patients/syn-patient-1/notes").with(csrf()).with(as(Role.DOCTOR))
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"code\":\"INVALID_REQUEST\"}", JsonCompareMode.STRICT));
+                .andExpect(apiError("INVALID_REQUEST"));
         verifyNoInteractions(service);
     }
 
@@ -146,7 +149,7 @@ class ClinicalNoteControllerTest {
     void malformedJsonIsABadRequestWithoutEcho() throws Exception {
         mvc.perform(post("/api/patients/syn-patient-1/notes").with(csrf()).with(as(Role.DOCTOR))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"Hemlig"))
-                .andExpect(status().isBadRequest()).andExpect(content().string(""));
+                .andExpect(status().isBadRequest()).andExpect(genericError());
     }
 
     @Test
@@ -172,11 +175,11 @@ class ClinicalNoteControllerTest {
             doThrow(c.failure()).when(service).create(any(), any(), any());
             var result = mvc.perform(post("/api/patients/syn-patient-1/notes").with(csrf()).with(as(Role.STAFF))
                     .contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().is(c.status()));
-            if (c.body().isEmpty()) result.andExpect(content().string(""));
-            else result.andExpect(content().json(c.body(), JsonCompareMode.STRICT));
+            if (c.body().isEmpty()) result.andExpect(genericError());
+            else result.andExpect(apiError(ApiErrorMatchers.codeIn(c.body())));
         }
         when(service.listOwn(user(Role.PATIENT))).thenThrow(new ClinicalNoteException("RECORD_NOT_LINKED"));
         mvc.perform(get("/api/patients/me/notes").with(as(Role.PATIENT))).andExpect(status().isNotFound())
-                .andExpect(content().json("{\"code\":\"RECORD_NOT_LINKED\"}", JsonCompareMode.STRICT));
+                .andExpect(apiError("RECORD_NOT_LINKED"));
     }
 }

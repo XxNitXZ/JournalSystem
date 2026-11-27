@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.medinexus.medicore.common.exception.ApiError;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.fhir.client.DuplicatePatientException;
 import com.medinexus.medicore.fhir.client.FhirServerException;
@@ -73,8 +74,8 @@ public class PatientController {
     }
 
     @ExceptionHandler(OwnPatientRecordException.class)
-    public ResponseEntity<Map<String, String>> ownRecordUnavailable(OwnPatientRecordException failure) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("code", failure.code()));
+    public ResponseEntity<ApiError> ownRecordUnavailable(OwnPatientRecordException failure) {
+        return ApiError.response(HttpStatus.NOT_FOUND, failure.code());
     }
 
     /** One Patient's profile, read directly from HAPI FHIR, with the e-mail of a linked PATIENT account. */
@@ -109,13 +110,13 @@ public class PatientController {
     }
 
     @ExceptionHandler(PatientVersionRequiredException.class)
-    public ResponseEntity<Map<String, String>> versionRequired() {
-        return ResponseEntity.status(HttpStatus.PRECONDITION_REQUIRED).body(Map.of("code", "VERSION_REQUIRED"));
+    public ResponseEntity<ApiError> versionRequired() {
+        return ApiError.response(HttpStatus.PRECONDITION_REQUIRED, "VERSION_REQUIRED");
     }
 
     @ExceptionHandler(PatientVersionConflictException.class)
-    public ResponseEntity<Map<String, String>> versionConflict() {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("code", "VERSION_CONFLICT"));
+    public ResponseEntity<ApiError> versionConflict() {
+        return ApiError.response(HttpStatus.CONFLICT, "VERSION_CONFLICT");
     }
 
     /**
@@ -128,45 +129,45 @@ public class PatientController {
     }
 
     @ExceptionHandler(TooManyPatientsException.class)
-    public ResponseEntity<Map<String, String>> tooManyPatients() {
-        return ResponseEntity.unprocessableContent().body(Map.of("code", "TOO_MANY_RESULTS"));
+    public ResponseEntity<ApiError> tooManyPatients() {
+        return ApiError.response(HttpStatus.UNPROCESSABLE_CONTENT, "TOO_MANY_RESULTS");
     }
 
     /** Created in FHIR but not recorded locally; the client must not register the Patient again. */
     @ExceptionHandler(PatientRegistryException.class)
-    public ResponseEntity<Map<String, String>> registryFailed() {
-        return ResponseEntity.internalServerError().body(Map.of("code", "REGISTRY_FAILED"));
+    public ResponseEntity<ApiError> registryFailed() {
+        return ApiError.response(HttpStatus.INTERNAL_SERVER_ERROR, "REGISTRY_FAILED");
     }
 
     @ExceptionHandler(PatientNotFoundException.class)
-    public ResponseEntity<Void> notFound() {
-        return ResponseEntity.notFound().build();
+    public ResponseEntity<ApiError> notFound() {
+        return ApiError.response(HttpStatus.NOT_FOUND);
     }
 
     /** Invalid data, including JSON that cannot be read (whose message may contain submitted values). */
     @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})
-    public ResponseEntity<Void> invalidRegistration() {
-        return ResponseEntity.badRequest().build();
+    public ResponseEntity<ApiError> invalidRegistration() {
+        return ApiError.response(HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Void> denied() {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+    public ResponseEntity<ApiError> denied() {
+        return ApiError.response(HttpStatus.FORBIDDEN);
     }
 
     @ExceptionHandler(DuplicatePatientException.class)
-    public ResponseEntity<Void> duplicate() {
-        return ResponseEntity.status(HttpStatus.CONFLICT).build();
+    public ResponseEntity<ApiError> duplicate() {
+        return ApiError.response(HttpStatus.CONFLICT);
     }
 
     /** The failure itself has already been logged safely by FhirRequestExecutor. */
     @ExceptionHandler(FhirServerException.class)
-    public ResponseEntity<Void> fhirFailure(FhirServerException failure) {
+    public ResponseEntity<ApiError> fhirFailure(FhirServerException failure) {
         HttpStatus status = switch (failure.type()) {
             case TIMEOUT, UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
             case CLIENT_ERROR -> HttpStatus.UNPROCESSABLE_CONTENT;
             case INVALID_RESPONSE, SERVER_ERROR -> HttpStatus.BAD_GATEWAY;
         };
-        return ResponseEntity.status(status).build();
+        return ApiError.response(status);
     }
 }

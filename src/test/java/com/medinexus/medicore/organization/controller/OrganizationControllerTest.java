@@ -1,5 +1,7 @@
 package com.medinexus.medicore.organization.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
@@ -94,6 +96,6 @@ class OrganizationControllerTest {
         when(organizations.findActiveOrganizations()).thenThrow(new FhirServerException("organization-search", type, null, List.of(), null));
         int expected = type == FhirServerException.Type.TIMEOUT || type == FhirServerException.Type.UNAVAILABLE ? 503 : 502;
         mvc.perform(get("/api/organizations").with(as(Role.DOCTOR))).andExpect(status().is(expected))
-                .andExpect(content().string(""));
+                .andExpect(genericError());
     }
 }

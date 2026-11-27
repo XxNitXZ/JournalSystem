@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.medinexus.medicore.common.exception.ApiError;
 import com.medinexus.medicore.auth.dto.AccountProfileDto;
 import com.medinexus.medicore.auth.dto.PasswordChangeRequest;
 import com.medinexus.medicore.auth.dto.ProfileUpdateRequest;
@@ -73,23 +74,23 @@ public class ProfileController {
     }
 
     @ExceptionHandler(AccountChangeException.class)
-    public ResponseEntity<Map<String, String>> rejected(AccountChangeException rejected) {
+    public ResponseEntity<ApiError> rejected(AccountChangeException rejected) {
         HttpStatus status = switch (rejected.code()) {
             case "CURRENT_PASSWORD_INVALID" -> HttpStatus.FORBIDDEN;
             case "EMAIL_TAKEN" -> HttpStatus.CONFLICT;
             default -> HttpStatus.BAD_REQUEST;
         };
-        return ResponseEntity.status(status).body(Map.of("code", rejected.code()));
+        return ApiError.response(status, rejected.code());
     }
 
     /** Unreadable JSON; the body is empty so that no input is echoed. */
     @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})
-    public ResponseEntity<Void> invalidProfile() {
-        return ResponseEntity.badRequest().build();
+    public ResponseEntity<ApiError> invalidProfile() {
+        return ApiError.response(HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Void> denied() {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+    public ResponseEntity<ApiError> denied() {
+        return ApiError.response(HttpStatus.FORBIDDEN);
     }
 }

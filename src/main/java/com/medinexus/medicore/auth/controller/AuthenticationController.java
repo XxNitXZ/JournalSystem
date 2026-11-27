@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.medinexus.medicore.common.exception.ApiError;
 import com.medinexus.medicore.auth.dto.LoginRequest;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.service.AccountTokenService;
@@ -65,7 +66,7 @@ public class AuthenticationController {
     }
 
     @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<Void> invalidCredentials() {
-        return ResponseEntity.status(401).build();
+    public ResponseEntity<ApiError> invalidCredentials() {
+        return ApiError.response(401);
     }
 }

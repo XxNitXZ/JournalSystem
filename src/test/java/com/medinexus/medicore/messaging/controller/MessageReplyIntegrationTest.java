@@ -1,5 +1,7 @@
 package com.medinexus.medicore.messaging.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -161,7 +163,7 @@ class MessageReplyIntegrationTest {
                         .param("senderId", owner.toString()).param("professionalId", owner.toString())
                         .param("patientId", ebba.toString()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"Unauthorized reply\"}"))
-                .andExpect(status().isForbidden()).andExpect(content().string(""));
+                .andExpect(status().isForbidden()).andExpect(genericError());
         assertThat(messages.count()).isEqualTo(before);
         assertThat(messages.findThread(maja, caller)).isEmpty();
     }
@@ -188,7 +190,7 @@ class MessageReplyIntegrationTest {
         long before = messages.count();
         mvc.perform(post("/api/messages/inbox/" + patient + "/reply").with(as(sender, role)).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().is(status)).andExpect(content().string(""));
+                .andExpect(status().is(status)).andExpect(genericError());
         assertThat(messages.count()).isEqualTo(before);
     }
 

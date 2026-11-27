@@ -1,5 +1,7 @@
 package com.medinexus.medicore.journalaccess;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.verify;
@@ -119,7 +121,7 @@ class JournalAccessControllerTest {
         when(service.requestAccess(any())).thenThrow(new JournalAccessConflictException("REQUEST_REJECTED"));
         mvc.perform(post("/api/journal-access/me/request").with(csrf()).with(as(Role.PATIENT)))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"code\":\"REQUEST_REJECTED\"}", true));
+                .andExpect(apiError("REQUEST_REJECTED"));
     }
 
     @Test
@@ -214,7 +216,7 @@ class JournalAccessControllerTest {
         when(service.approve(any(), anyLong())).thenThrow(new JournalAccessConflictException("PERSONNUMMER_MISMATCH"));
         mvc.perform(post("/api/journal-access-requests/5/approve").with(csrf()).with(as(Role.DOCTOR)))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"code\":\"PERSONNUMMER_MISMATCH\"}", true));
+                .andExpect(apiError("PERSONNUMMER_MISMATCH"));
 
         when(service.reject(any(), anyLong())).thenThrow(new JournalAccessRequestNotFoundException());
         mvc.perform(post("/api/journal-access-requests/5/reject").with(csrf()).with(as(Role.DOCTOR)))

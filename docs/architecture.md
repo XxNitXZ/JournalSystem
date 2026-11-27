@@ -9,6 +9,7 @@ the services depend on each other. It is built up during EPIC-01:
 | Database schemas and Flyway split | NIT-324 | ✅ [§7](#7-database-schemas) |
 | Gateway routes and OpenAPI | NIT-326 | ✅ [§8](#8-gateway-routes-and-openapi) |
 | Authentication (JWT cookie) | NIT-327 | ✅ [§9](#9-authentication-jwt-cookie) |
+| Error format and timeouts | NIT-328 | ✅ [§10](#10-error-format-and-timeouts) |
 
 Data ownership between PostgreSQL and HAPI FHIR is unchanged and described in
 [`infrastructure/DATA_OWNERSHIP.md`](../infrastructure/DATA_OWNERSHIP.md): HAPI FHIR stays the source of truth for
@@ -342,3 +343,40 @@ MediPortal stops asking for it (NIT-338).
   changes.
 - **A changed role or deleted account** is noticed on the next `GET /api/auth/me`, which re-reads the database and
   returns 401 for a deleted account. Other endpoints trust the token until it expires.
+
+## 10. Error format and timeouts
+
+**One error body everywhere** (`common.exception.ApiError`):
+
+```json
+{"status":409,"error":"Conflict","message":"The request conflicts with the current state.","code":"EMAIL_TAKEN"}
+```
+
+- `message` is a fixed text chosen by status, **never** an exception message or user input, so an error can't
+  leak a name or personnummer.
+- `code` is the machine-readable reason MediPortal reads (`VERSION_CONFLICT`, `PERSONNUMMER_TAKEN`, …). It is left
+  out when there is none.
+- **Who produces it:**
+  - Each controller's own `@ExceptionHandler`s keep their status codes and codes, and return `ApiError`.
+  - `GlobalExceptionHandler` catches everything else: malformed input 400, wrong method 405, wrong content type 415,
+    unknown 500.
+  - The security filters write the same JSON for 401 and 403.
+- Logs name only the exception type and where it was thrown.
+
+**Status codes for failures of other systems**
+
+| Cause | Status |
+|---|---|
+| FHIR server or another MediCore service timed out or is unreachable | **503** |
+| FHIR server or another MediCore service answered with something invalid or an error | **502** |
+| FHIR server rejected the request (4xx), on clinical write endpoints | **422** |
+
+**Timeouts**
+
+| Outgoing call | Connect | Read | Where |
+|---|---|---|---|
+| HAPI FHIR | 10 s | 30 s | `medinexus.fhir.*-timeout` (unchanged from Lab 1) |
+| Another MediCore service (`/internal/**`) | 3 s | 10 s | `common.http.ServiceClients` |
+
+`ServiceClients.forService("http://identity:8080")` gives a `RestClient` with these timeouts. It also adds a fresh
+service token to every request. There are no retries, because a retried write could be applied twice.

@@ -1,5 +1,7 @@
 package com.medinexus.medicore.patient.controller;
 
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.apiError;
+import static com.medinexus.medicore.common.exception.ApiErrorMatchers.genericError;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -109,7 +111,7 @@ class PatientImportControllerTest {
             mvc.perform(post("/api/patients/import").with(csrf()).with(as(Role.STAFF))
                             .contentType(MediaType.APPLICATION_JSON).content(body))
                     .andExpect(status().isBadRequest())
-                    .andExpect(content().json("{\"code\":\"INVALID_REQUEST\"}", JsonCompareMode.STRICT));
+                    .andExpect(apiError("INVALID_REQUEST"));
         }
         mvc.perform(post("/api/patients/import/search").with(csrf()).with(as(Role.STAFF))
                 .contentType(MediaType.APPLICATION_JSON).content("{\"mode\":\"NAME\",\"value\":\"Ali\",\"page\":2}"))
@@ -134,7 +136,7 @@ class PatientImportControllerTest {
             var result = mvc.perform(post("/api/patients/import").with(csrf()).with(as(Role.DOCTOR))
                     .contentType(MediaType.APPLICATION_JSON).content("{\"fhirPatientId\":\"ext-1\"}"))
                     .andExpect(status().is(c.status()));
-            if (c.code() != null) result.andExpect(content().json("{\"code\":\"" + c.code() + "\"}", JsonCompareMode.STRICT));
+            if (c.code() != null) result.andExpect(apiError(c.code()));
         }
         org.mockito.Mockito.reset(service);
         when(service.discover(any(), any(), any())).thenThrow(new FhirServerException("patient-discovery",

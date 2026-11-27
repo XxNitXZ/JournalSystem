@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.medinexus.medicore.common.exception.ApiError;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.fhir.client.FhirServerException;
 import com.medinexus.medicore.practitioner.dto.PractitionerOption;
@@ -31,15 +32,15 @@ public class PractitionerController {
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Void> denied() {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+    public ResponseEntity<ApiError> denied() {
+        return ApiError.response(HttpStatus.FORBIDDEN);
     }
 
     /** Already logged safely by FhirRequestExecutor. */
     @ExceptionHandler(FhirServerException.class)
-    public ResponseEntity<Void> fhirFailure(FhirServerException failure) {
-        return ResponseEntity.status(failure.type() == FhirServerException.Type.TIMEOUT
+    public ResponseEntity<ApiError> fhirFailure(FhirServerException failure) {
+        return ApiError.response(failure.type() == FhirServerException.Type.TIMEOUT
                 || failure.type() == FhirServerException.Type.UNAVAILABLE ? HttpStatus.SERVICE_UNAVAILABLE
-                        : HttpStatus.BAD_GATEWAY).build();
+                        : HttpStatus.BAD_GATEWAY);
     }
 }

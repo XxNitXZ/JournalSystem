@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import com.medinexus.medicore.common.exception.ApiError;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.service.AccountTokenService;
 import com.medinexus.medicore.fhir.client.FhirServerException;
@@ -92,30 +93,30 @@ public class JournalAccessController {
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Void> denied() {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+    public ResponseEntity<ApiError> denied() {
+        return ApiError.response(HttpStatus.FORBIDDEN);
     }
 
     @ExceptionHandler(JournalAccessRequestNotFoundException.class)
-    public ResponseEntity<Void> notFound() {
-        return ResponseEntity.notFound().build();
+    public ResponseEntity<ApiError> notFound() {
+        return ApiError.response(HttpStatus.NOT_FOUND);
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<Void> malformedId() {
-        return ResponseEntity.badRequest().build();
+    public ResponseEntity<ApiError> malformedId() {
+        return ApiError.response(HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(JournalAccessConflictException.class)
-    public ResponseEntity<Map<String, String>> conflict(JournalAccessConflictException conflict) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("code", conflict.code()));
+    public ResponseEntity<ApiError> conflict(JournalAccessConflictException conflict) {
+        return ApiError.response(HttpStatus.CONFLICT, conflict.code());
     }
 
     /** Already logged safely by FhirRequestExecutor. */
     @ExceptionHandler(FhirServerException.class)
-    public ResponseEntity<Void> fhirFailure(FhirServerException failure) {
-        return ResponseEntity.status(failure.type() == FhirServerException.Type.TIMEOUT
+    public ResponseEntity<ApiError> fhirFailure(FhirServerException failure) {
+        return ApiError.response(failure.type() == FhirServerException.Type.TIMEOUT
                 || failure.type() == FhirServerException.Type.UNAVAILABLE ? HttpStatus.SERVICE_UNAVAILABLE
-                        : HttpStatus.BAD_GATEWAY).build();
+                        : HttpStatus.BAD_GATEWAY);
     }
 }
