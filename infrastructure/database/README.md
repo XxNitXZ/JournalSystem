@@ -318,6 +318,22 @@ before you run `mvnw test`. Without the variables they fail with the
 "Missing environment variable(s)" report. Web-only tests such as
 `HealthControllerTest` don't need a database.
 
+## Lab 2: one schema per microservice
+
+From Lab 2, each service (Identity, Clinical, Messaging) has its own schema and DB user in this same database. The
+design is in [docs/architecture.md §7](../../docs/architecture.md#7-database-schemas). Create the schemas and users
+once (choose three passwords; they become Kubernetes Secrets later):
+
+```bash
+docker exec -i medinexus-postgres psql -U medinexus -d medinexus_db -v ON_ERROR_STOP=1 \
+  -v identity_password='…' -v clinical_password='…' -v messaging_password='…' \
+  < infrastructure/database/init-schemas.sql
+```
+
+Don't run `migrate-lab1-data.sql` yet. It copies the Lab 1 data into the new schemas at the EPIC-02 cut-over (the
+file header has the exact steps). The section below describes the Lab 1 monolith's migrations, which stay unchanged
+until then.
+
 ## Database migrations (Flyway)
 
 ### What Flyway does
