@@ -11,10 +11,7 @@ import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
-import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,10 +21,10 @@ import org.springframework.web.bind.annotation.RestController;
 import com.medinexus.medicore.auth.dto.RegistrationRequest;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.entity.Role;
+import com.medinexus.medicore.auth.service.AccountTokenService;
 import com.medinexus.medicore.auth.service.PersonnummerAlreadyRegisteredException;
 import com.medinexus.medicore.auth.service.RegistrationService;
 
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
@@ -51,25 +48,22 @@ public class RegistrationController {
 
     private final RegistrationService registrationService;
     private final AuthenticationManager authenticationManager;
-    private final SessionAuthenticationStrategy sessionStrategy;
-    private final SecurityContextRepository contextRepository;
+    private final AccountTokenService accountTokens;
 
     public RegistrationController(RegistrationService registrationService, AuthenticationManager authenticationManager,
-            SessionAuthenticationStrategy sessionStrategy, SecurityContextRepository contextRepository) {
+            AccountTokenService accountTokens) {
         this.registrationService = registrationService;
         this.authenticationManager = authenticationManager;
-        this.sessionStrategy = sessionStrategy;
-        this.contextRepository = contextRepository;
+        this.accountTokens = accountTokens;
     }
 
     @PostMapping("/register")
-    public ResponseEntity<UserDto> register(@RequestBody RegistrationRequest request, HttpServletRequest httpRequest,
-            HttpServletResponse httpResponse) {
+    public ResponseEntity<UserDto> register(@RequestBody RegistrationRequest request, HttpServletResponse httpResponse) {
         // Any failure here (invalid data, duplicate e-mail) propagates before a sign-in is attempted.
         UserDto user = registrationService.register(request.email(), request.password(), request.role(),
                 request.givenName(), request.familyName(), request.personnummer(), request.phoneNumber());
         if (user.role() == Role.PATIENT && isAnonymous()) {
-            signIn(user, request.password(), httpRequest, httpResponse);
+            signIn(user, request.password(), httpResponse);
         }
         return ResponseEntity.status(HttpStatus.CREATED).body(user);
     }
@@ -79,8 +73,11 @@ public class RegistrationController {
         return current == null || current instanceof AnonymousAuthenticationToken || !current.isAuthenticated();
     }
 
-    /** The same steps as AuthenticationController.login; a failure leaves the caller signed out. */
-    private void signIn(UserDto user, String password, HttpServletRequest request, HttpServletResponse response) {
+    /**
+     * The same steps as AuthenticationController.login: check the password, then set the token cookie. A failure
+     * leaves the caller signed out (no cookie is set).
+     */
+    private void signIn(UserDto user, String password, HttpServletResponse response) {
         try {
             Authentication authentication = authenticationManager.authenticate(
                     UsernamePasswordAuthenticationToken.unauthenticated(user.email(), password));
@@ -88,13 +85,8 @@ public class RegistrationController {
                     || principal.role() != Role.PATIENT) {
                 throw new IllegalStateException("Authenticated principal does not match the registered account");
             }
-            sessionStrategy.onAuthentication(authentication, request, response);
-            SecurityContext context = SecurityContextHolder.createEmptyContext();
-            context.setAuthentication(authentication);
-            SecurityContextHolder.setContext(context);
-            contextRepository.saveContext(context, request, response);
+            accountTokens.issue(principal.id(), response);
         } catch (RuntimeException failure) {
-            SecurityContextHolder.clearContext();
             log.warn("Automatic sign-in after registration failed: accountId={}, cause={}", user.id(),
                     failure.getClass().getSimpleName());
         }

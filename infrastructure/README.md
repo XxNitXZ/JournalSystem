@@ -243,29 +243,28 @@ cannot use port 8080 at the same time.
 
 ## Environment variables
 
-### Authentication sessions
+### Authentication (JWT cookie)
 
-MediCore uses in-memory HTTP sessions with HttpOnly, SameSite=Lax cookies and a
-30-minute inactivity timeout. Restarting MediCore ends existing sessions. Set
-`SESSION_COOKIE_SECURE=true` when serving the API over HTTPS.
+Since Lab 2 (NIT-327) MediCore keeps no HTTP session. Login sets a signed JWT in the cookie `medicore_token`
+(`HttpOnly`, `SameSite=Strict`, `Path=/`, 30 minutes). Every request is authenticated from that cookie, so restarting
+MediCore no longer signs anyone out. Design: [docs/architecture.md §9](../docs/architecture.md#9-authentication-jwt-cookie).
 
-Browser clients calling the API across origins must use `credentials: 'include'`.
-Only the configured `MEDINEXUS_CORS_ALLOWED_ORIGINS` may make credentialed calls.
+| Variable | Required | Meaning |
+|---|---|---|
+| `JWT_SECRET` | yes | HS256 signing key, at least 32 characters, the same in every service. Generate with `openssl rand -base64 48`. MediCore does not start without it |
+| `JWT_COOKIE_SECURE` | no (default `false`) | `true` when the API is served over HTTPS, so the cookie is only sent over HTTPS |
 
-1. Call `GET /api/auth/csrf` to obtain `token` and `headerName`, retaining the
-   session cookie. Send that token in the named header for POST requests,
-   including registration, login, and logout. Missing or invalid tokens return 403.
-2. Call `POST /api/auth/login` with JSON `email` and `password`. Success returns
-   200 with `id`, `email`, and `role`, and rotates the session ID. Invalid
-   credentials return an empty 401 response. Malformed JSON returns 400.
-3. Fetch a new CSRF token after login. `GET /api/auth/me` returns the same user
-   summary, or 401 without an authenticated session.
-4. Call `POST /api/auth/logout` with a valid CSRF token. It returns 204,
-   invalidates the session, and expires the session cookie. Bootstrap a new CSRF
-   token before further writes.
+Browser clients calling the API across origins must use `credentials: 'include'`. Only the configured
+`MEDINEXUS_CORS_ALLOWED_ORIGINS` may make credentialed calls.
 
-Registration retains its request and response formats and 201/400/409 behavior
-when supplied with a valid CSRF token. Frontend CSRF integration is separate work.
+1. `POST /api/auth/login` with JSON `email` and `password`. Success returns 200 with the account summary and sets the
+   cookie. Invalid credentials return an empty 401 and no cookie. Malformed JSON returns 400.
+2. `GET /api/auth/me` returns the account summary, read fresh from the database, and renews the cookie (another 30
+   minutes, with current claims). Without a valid cookie it returns 401.
+3. `POST /api/auth/logout` returns 204 and overwrites the cookie with an expired one.
+
+No CSRF token is needed: the browser never sends a `SameSite=Strict` cookie on requests started by another site.
+`GET /api/auth/csrf` still answers with a dummy token for MediPortal until NIT-338 removes it from the frontend.
 
 ### Container settings
 

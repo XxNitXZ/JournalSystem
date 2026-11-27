@@ -32,7 +32,7 @@ explains how it was checked.
 | Observation, Condition, Encounter | HAPI FHIR | KTH server | implemented (read, create, search by patient); Encounters created and listed through MediCore since US-05.05 (`/api/patients/{id}/encounters`, `/api/patients/me/encounters`), Conditions (diagnoses) since US-05.02 (`/api/patients/{id}/conditions`, `/api/patients/me/conditions`); never copied to PostgreSQL |
 | Clinical notes (DocumentReference) | HAPI FHIR | KTH server | implemented (US-05.01): created and listed through MediCore (`/api/patients/{id}/notes`, `/api/patients/me/notes`); note text and metadata only in HAPI FHIR, never copied to PostgreSQL |
 | Organization, Location | HAPI FHIR | KTH server | implemented (read, create, update) |
-| Login session | MediCore memory | in-memory HTTP session | implemented (not persisted) |
+| Login | browser cookie | signed JWT `medicore_token` (account id, e-mail, role, names, linked FHIR ids); nothing stored on the server | implemented (NIT-327) |
 
 ## PostgreSQL (implemented)
 
@@ -169,11 +169,12 @@ Rules (enforced by migration V3, `AccountFhirIdentityService` and, for approvals
   registration, and FHIR Patient names cannot be changed through MediCore
   either (only the gender can); existing differences are left as they are.
   An authorized identity-correction workflow does not exist.
-- **Login session**: the in-memory HTTP session holds the authenticated
-  `UserDto` (id, e-mail, role, first and last name). It is not persisted and
-  contains no FHIR data or phone number. After an e-mail change the principal
-  in the session is replaced with the new address; the session keeps referring
-  to the same account ID.
+- **Login token**: a signed JWT in the browser's `medicore_token` cookie holds the
+  account id, e-mail, role, first and last name, and the linked FHIR Patient or
+  Practitioner logical id. It holds no clinical data, phone number, personnummer
+  or password hash, and nothing is stored on the server. It is re-issued from the
+  database on login, `GET /api/auth/me`, `GET /api/journal-access/me` and after
+  an e-mail change, so its claims follow the account.
 - **MediPortal**: the frontend does not call the FHIR server and does not use
   `localStorage` or `sessionStorage`.
 

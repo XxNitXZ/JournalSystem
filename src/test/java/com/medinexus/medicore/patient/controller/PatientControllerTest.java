@@ -125,13 +125,6 @@ class PatientControllerTest {
         verify(patientService, never()).registerPatient(any(), any());
     }
 
-    @Test
-    void requestsWithoutCsrfTokenAreForbidden() throws Exception {
-        mvc.perform(post("/api/patients").with(as(Role.STAFF)).contentType(MediaType.APPLICATION_JSON).content(BODY))
-                .andExpect(status().isForbidden());
-        verify(patientService, never()).registerPatient(any(), any());
-    }
-
     @ParameterizedTest
     @EnumSource(Role.class)
     void otherMethodsOnPatientsRemainDenied(Role role) throws Exception {
@@ -317,12 +310,10 @@ class PatientControllerTest {
     }
 
     @Test
-    void searchRequiresAuthenticationTheClinicalRoleAndCsrf() throws Exception {
+    void searchRequiresAuthenticationAndTheClinicalRole() throws Exception {
         mvc.perform(post("/api/patients/search").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(SEARCH))
                 .andExpect(status().isUnauthorized());
         mvc.perform(post("/api/patients/search").with(csrf()).with(as(Role.PATIENT))
-                .contentType(MediaType.APPLICATION_JSON).content(SEARCH)).andExpect(status().isForbidden());
-        mvc.perform(post("/api/patients/search").with(as(Role.DOCTOR))
                 .contentType(MediaType.APPLICATION_JSON).content(SEARCH)).andExpect(status().isForbidden());
         verify(patientService, never()).searchPatients(any(), any());
     }
@@ -438,15 +429,13 @@ class PatientControllerTest {
     }
 
     @Test
-    void patientsAnonymousUsersAndRequestsWithoutCsrfCannotUpdate() throws Exception {
+    void patientsAndAnonymousUsersCannotUpdate() throws Exception {
         mvc.perform(patch("/api/patients/syn-profile-41").with(csrf()).with(as(Role.PATIENT)).header("If-Match", "2")
                 .contentType(MediaType.APPLICATION_JSON).content(UPDATE_BODY)).andExpect(status().isForbidden());
         mvc.perform(patch("/api/patients/me").with(csrf()).with(as(Role.PATIENT)).header("If-Match", "2")
                 .contentType(MediaType.APPLICATION_JSON).content(UPDATE_BODY)).andExpect(status().isForbidden());
         mvc.perform(patch("/api/patients/syn-profile-41").with(csrf()).header("If-Match", "2")
                 .contentType(MediaType.APPLICATION_JSON).content(UPDATE_BODY)).andExpect(status().isUnauthorized());
-        mvc.perform(patch("/api/patients/syn-profile-41").with(as(Role.DOCTOR)).header("If-Match", "2")
-                .contentType(MediaType.APPLICATION_JSON).content(UPDATE_BODY)).andExpect(status().isForbidden());
         verify(patientService, never()).updatePatient(any(), any(), any(), any());
     }
 

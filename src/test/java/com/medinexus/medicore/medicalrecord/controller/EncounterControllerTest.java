@@ -143,14 +143,13 @@ class EncounterControllerTest {
     }
 
     @Test
-    void anonymousRequestsAndMissingCsrfTokensAreRejected() throws Exception {
+    void anonymousRequestsAreRejected() throws Exception {
+        // CSRF tokens are gone since NIT-327 (SameSite=Strict token cookie, see JwtCookieAuthenticationIntegrationTest).
         mvc.perform(get("/api/patients/syn-patient-1/encounters")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/patients/me/encounters")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/practitioners")).andExpect(status().isUnauthorized());
         mvc.perform(post("/api/patients/syn-patient-1/encounters").with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isUnauthorized());
-        mvc.perform(post("/api/patients/syn-patient-1/encounters").with(as(Role.DOCTOR))
-                .contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isForbidden());
         verifyNoInteractions(service, directory);
     }
 

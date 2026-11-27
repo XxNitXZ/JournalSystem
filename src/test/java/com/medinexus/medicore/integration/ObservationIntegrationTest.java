@@ -229,11 +229,10 @@ class ObservationIntegrationTest {
         assertThat(STORED.get(1).hasDataAbsentReason()).isTrue();
     }
 
-    @Test void enforcesAnonymousRolesStaleAccountsCsrfAndRegistry() throws Exception {
+    @Test void enforcesAnonymousRolesStaleAccountsAndRegistry() throws Exception {
         mvc.perform(get(path("me"))).andExpect(status().isUnauthorized());
         mvc.perform(post(path(patientId)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isUnauthorized());
         mvc.perform(post(path(patientId)).with(as(patient, Role.PATIENT)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isForbidden());
-        mvc.perform(post(path(patientId)).with(as(doctor, Role.DOCTOR)).contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isForbidden());
         mvc.perform(post(path(patientId)).with(as(patient, Role.DOCTOR)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isForbidden());
         mvc.perform(get(path("me")).with(as(doctor, Role.PATIENT))).andExpect(status().isForbidden());
         mvc.perform(get(path(patientId)).with(as(-1L, Role.STAFF))).andExpect(status().isForbidden());

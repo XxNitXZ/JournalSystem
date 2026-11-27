@@ -8,7 +8,7 @@ the services depend on each other. It is built up during EPIC-01:
 | Services, ownership, cross-service dependencies | NIT-323 | ✅ this version |
 | Database schemas and Flyway split | NIT-324 | ✅ [§7](#7-database-schemas) |
 | Gateway routes and OpenAPI | NIT-326 | ✅ [§8](#8-gateway-routes-and-openapi) |
-| Authentication (JWT cookie) | NIT-327 | open (draft input in [§6](#6-input-for-later-epic-01-tasks)) |
+| Authentication (JWT cookie) | NIT-327 | ✅ [§9](#9-authentication-jwt-cookie) |
 
 Data ownership between PostgreSQL and HAPI FHIR is unchanged and described in
 [`infrastructure/DATA_OWNERSHIP.md`](../infrastructure/DATA_OWNERSHIP.md): HAPI FHIR stays the source of truth for
@@ -153,16 +153,8 @@ from starting.
 
 Found during the inventory. To be decided and documented in the named task:
 
-- **NIT-327 (auth): stale claims.** Lab 1 reloads the account from the database on every request, so an
-  approved journal access takes effect immediately. With a JWT, the patient's `fhirPatientId` claim stays empty
-  until a new token is issued. Proposal: `GET /api/auth/me` (which MediPortal calls on load) and
-  `GET /api/journal-access/me` re-issue the cookie with fresh claims, and tokens live briefly (about 30 min, renewed
-  on those calls).
-- **NIT-327 (auth): service tokens.** `/internal/**` calls (D2–D6) carry a short-lived JWT with `role=SERVICE`,
-  signed with the same key. Each service only accepts `role=SERVICE` on `/internal/**`, and the Ingress never
-  routes `/internal/**`.
-- **NIT-327 (auth): CSRF.** `/api/auth/csrf` and the session CSRF token go away (SameSite=Strict cookie plus a
-  same-origin Ingress). MediPortal stops calling `/api/auth/csrf` (NIT-338).
+- ~~NIT-327 (auth)~~: stale claims, service tokens and CSRF are handled in [§9](#9-authentication-jwt-cookie).
+  `/api/auth/csrf` remains as a no-op until MediPortal stops calling it (NIT-338).
 - ~~NIT-326 (routes)~~: both route findings are handled in [§8](#8-gateway-routes-and-openapi).
 ## 7. Database schemas
 
@@ -289,3 +281,64 @@ prefixes as the Ingress (configured in NIT-338). Requests go to relative paths (
 
 Vite proxy keys match by plain string prefix, not by whole segment, so `/api/journal-access` would also catch
 `/api/journal-access-requests`. Here that's harmless, because both go to Identity.
+
+## 9. Authentication (JWT cookie)
+
+Implemented in the monolith first (NIT-327), in the self-contained package `com.medinexus.medicore.security.jwt`.
+NIT-788 moves that package to `common`, so every Spring service verifies tokens the same way. Node and Quarkus
+verify the same HS256 tokens with `jose` and `smallrye-jwt`.
+
+**How it works**
+
+1. `POST /api/auth/login` checks the password, then signs a JWT and sets it as the cookie `medicore_token`
+   (`HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age=1800`; `Secure` when `JWT_COOKIE_SECURE=true`). There is no
+   HTTP session and no `JSESSIONID`.
+2. On every request, Spring Security's OAuth2 resource server reads the token from the cookie, or from an
+   `Authorization: Bearer` header for service calls. It checks the signature, expiry (60 s clock skew), issuer
+   and claim shape, then turns the claims into the same `UserDto` principal the controllers used before. Any
+   failure gives **401**.
+3. `GET /api/auth/me`, `GET /api/journal-access/me` and a profile e-mail change **re-issue** the cookie from the
+   account as stored now. The 30 minutes therefore slide while MediPortal is in use, and new claims, such as a
+   `fhirPatientId` after journal access is approved, take effect without signing in again.
+4. `POST /api/auth/logout` overwrites the cookie with an expired one.
+
+**User token claims**
+
+| Claim | Example | Notes |
+|---|---|---|
+| `iss` | `medicore` | required on every token |
+| `sub` | `42` | account id (`identity.users.id`) |
+| `typ` | `user` | `user` or `service` |
+| `role` | `PATIENT` | `PATIENT`, `DOCTOR`, `STAFF` (`SERVICE` for service tokens) |
+| `email`, `givenName`, `familyName` | | for the principal; names may be absent |
+| `fhirPatientId` / `fhirPractitionerId` | `syn-patient-1` | only if the account is linked (D1) |
+| `iat`, `exp` | | 30 minutes apart |
+
+Never in a token: password hash, personnummer, phone number, clinical data. The payload is signed, not encrypted:
+anyone holding the cookie can read it. `HttpOnly` keeps it away from page scripts.
+
+**Service tokens.** `JwtTokenService.serviceToken("clinical")` signs a 60-second token with `typ=service`,
+`role=SERVICE` and `sub=<service name>`. It is sent as `Authorization: Bearer …` to `/internal/**`, which accepts
+**only** `ROLE_SERVICE`. User tokens get 403 there, and service tokens get 403 on every user endpoint.
+
+**Key.** One HS256 secret, `JWT_SECRET` (at least 32 bytes), shared by all services through a Kubernetes Secret
+(EPIC-05). Startup fails without it. The secret is never logged (`JwtProperties.toString()` hides it). Tests use a
+fixed test-only key in `src/test/resources/config/application.properties`.
+
+**CSRF.** No CSRF tokens. The browser never sends a `SameSite=Strict` cookie on a request started by another site,
+and behind the Ingress the frontend and the API share one origin. `GET /api/auth/csrf` returns a dummy token until
+MediPortal stops asking for it (NIT-338).
+
+**Trade-offs (accepted for Lab 2)**
+
+- **Logout can't revoke a token.** Logout removes the cookie from that browser, but nothing on the server remembers
+  the token. A token copied before logout keeps working until it expires, at most 30 minutes. The same applies
+  after a password change. Covered by `JwtCookieAuthenticationIntegrationTest.aCopiedTokenStaysValidUntilItExpires…`.
+  The Lab 1 session could be invalidated; a stateless token can't without a server-side blocklist, which would
+  bring back the shared state we removed. Keycloak's access tokens in Lab 3 behave the same way.
+- **One shared key.** With HS256, any service that holds the key could also sign a user token. RS256 (Identity
+  signs with a private key, the others verify with the public key) avoids that, but services would then need
+  another way to get service tokens. Lab 3 moves signing to Keycloak (RS256), and the verification code barely
+  changes.
+- **A changed role or deleted account** is noticed on the next `GET /api/auth/me`, which re-reads the database and
+  returns 401 for a deleted account. Other endpoints trust the token until it expires.

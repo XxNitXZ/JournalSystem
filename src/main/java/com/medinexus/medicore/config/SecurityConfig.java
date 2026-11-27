@@ -4,9 +4,14 @@ import java.util.List;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.ProviderManager;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationProvider;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -15,22 +20,30 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
-import org.springframework.security.web.context.SecurityContextRepository;
-import org.springframework.security.web.csrf.CsrfAuthenticationStrategy;
-import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
-import org.springframework.security.web.authentication.session.ChangeSessionIdAuthenticationStrategy;
-import org.springframework.security.web.authentication.session.CompositeSessionAuthenticationStrategy;
-import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.service.AuthenticationService;
+import com.medinexus.medicore.security.jwt.CookieBearerTokenResolver;
+import com.medinexus.medicore.security.jwt.JwtPrincipalConverter;
+import com.medinexus.medicore.security.jwt.JwtSecurityConfig;
+import com.medinexus.medicore.security.jwt.JwtTokenService;
 
 import jakarta.servlet.DispatcherType;
 
+/**
+ * Stateless security (NIT-327): no HTTP session. Every request is authenticated by the signed JWT in the
+ * {@code medicore_token} cookie (or an {@code Authorization: Bearer} header for service calls), which Spring
+ * Security's OAuth2 resource server verifies. CSRF tokens are not used: the cookie is {@code SameSite=Strict}, so the
+ * browser never sends it on a request started by another site.
+ */
 @Configuration
 @EnableWebSecurity
+@Import(JwtSecurityConfig.class)
 public class SecurityConfig {
+
+    /** Every role a person can have; service tokens ({@code ROLE_SERVICE}) are excluded. */
+    private static final String[] USER_ROLES = {"PATIENT", "DOCTOR", "STAFF"};
 
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationService service) {
@@ -48,43 +61,41 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityContextRepository securityContextRepository() {
-        return new HttpSessionSecurityContextRepository();
-    }
-
-    @Bean
-    public HttpSessionCsrfTokenRepository csrfTokenRepository() {
-        return new HttpSessionCsrfTokenRepository();
-    }
-
-    @Bean
-    public SessionAuthenticationStrategy sessionAuthenticationStrategy(HttpSessionCsrfTokenRepository csrfRepository) {
-        return new CompositeSessionAuthenticationStrategy(List.of(
-                new ChangeSessionIdAuthenticationStrategy(), new CsrfAuthenticationStrategy(csrfRepository)));
-    }
-
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, SecurityContextRepository contextRepository,
-            HttpSessionCsrfTokenRepository csrfRepository) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, CookieBearerTokenResolver tokenResolver,
+            JwtDecoder jwtDecoder, JwtPrincipalConverter principalConverter, JwtTokenService tokens) throws Exception {
+        // Tokens are checked by a manager that knows only JWTs. Without it, Spring would fall back to the password
+        // AuthenticationManager above for a rejected token and try it as an e-mail and password.
+        JwtAuthenticationProvider jwtProvider = new JwtAuthenticationProvider(jwtDecoder);
+        jwtProvider.setJwtAuthenticationConverter(principalConverter);
+        AuthenticationManager jwtAuthentication = new ProviderManager(jwtProvider);
         return http
                 .cors(Customizer.withDefaults())
-                .csrf(csrf -> csrf.csrfTokenRepository(csrfRepository))
-                .securityContext(context -> context.securityContextRepository(contextRepository))
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .requestCache(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
+                .oauth2ResourceServer(resourceServer -> resourceServer
+                        .bearerTokenResolver(tokenResolver)
+                        .jwt(jwt -> jwt.authenticationManager(jwtAuthentication))
+                        // Plain status codes without a body, as before.
+                        .authenticationEntryPoint((request, response, exception) -> response.setStatus(401))
+                        .accessDeniedHandler((request, response, exception) -> response.setStatus(403)))
                 .authorizeHttpRequests(authorize -> authorize
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register", "/api/auth/logout")
+                                .permitAll()
+                        // /api/auth/csrf is a temporary no-op kept for MediPortal until NIT-338.
                         .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/api/health",
                                 "/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/auth/me").authenticated()
+                        // Service-to-service endpoints (EPIC-02); never reachable with a user token.
+                        .requestMatchers("/internal/**").hasRole("SERVICE")
+                        .requestMatchers(HttpMethod.GET, "/api/auth/me").hasAnyRole(USER_ROLES)
                         // The signed-in user's own account: read, change e-mail/phone, change password.
-                        .requestMatchers(HttpMethod.GET, "/api/auth/profile").authenticated()
-                        .requestMatchers(HttpMethod.PATCH, "/api/auth/profile").authenticated()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/password").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/auth/profile").hasAnyRole(USER_ROLES)
+                        .requestMatchers(HttpMethod.PATCH, "/api/auth/profile").hasAnyRole(USER_ROLES)
+                        .requestMatchers(HttpMethod.POST, "/api/auth/password").hasAnyRole(USER_ROLES)
                         .requestMatchers(HttpMethod.POST, "/api/messages/inbox/*/reply").hasAnyRole("DOCTOR", "STAFF")
                         .requestMatchers(HttpMethod.GET, "/api/messages/inbox",
                                 "/api/messages/inbox/*").hasAnyRole("DOCTOR", "STAFF")
@@ -136,8 +147,13 @@ public class SecurityConfig {
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> response.setStatus(401))
                         .accessDeniedHandler((request, response, exception) -> response.setStatus(403)))
-                .logout(logout -> logout.logoutUrl("/api/auth/logout")
-                        .deleteCookies("JSESSIONID")
+                // Logout overwrites the token cookie with an expired one. POST only: without CSRF protection Spring
+                // would otherwise accept any method.
+                .logout(logout -> logout
+                        .logoutRequestMatcher(PathPatternRequestMatcher.withDefaults()
+                                .matcher(HttpMethod.POST, "/api/auth/logout"))
+                        .addLogoutHandler((request, response, authentication) ->
+                                response.addHeader(HttpHeaders.SET_COOKIE, tokens.clearedCookie().toString()))
                         .logoutSuccessHandler((request, response, authentication) -> response.setStatus(204)))
                 .build();
     }

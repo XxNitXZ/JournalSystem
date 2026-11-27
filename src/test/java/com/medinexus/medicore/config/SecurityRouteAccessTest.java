@@ -1,5 +1,7 @@
 package com.medinexus.medicore.config;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -10,9 +12,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Arrays;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -33,9 +37,11 @@ import com.medinexus.medicore.auth.controller.AuthenticationController;
 import com.medinexus.medicore.auth.controller.RegistrationController;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.entity.Role;
+import com.medinexus.medicore.auth.service.AccountTokenService;
 import com.medinexus.medicore.auth.service.AuthenticationService;
 import com.medinexus.medicore.auth.service.RegistrationService;
 import com.medinexus.medicore.health.controller.HealthController;
+import com.medinexus.medicore.security.jwt.TestTokens;
 
 @WebMvcTest({AuthenticationController.class, RegistrationController.class, HealthController.class})
 @Import(SecurityConfig.class)
@@ -50,6 +56,19 @@ class SecurityRouteAccessTest {
     @MockitoBean
     private RegistrationService registrationService;
 
+    /** Issuing the cookie is tested in AuthenticationControllerTest; here only the route rules matter. */
+    @MockitoBean
+    private AccountTokenService accountTokens;
+
+    /** Role of the stored account that the mocked token service returns. */
+    private Role currentRole = Role.PATIENT;
+
+    @BeforeEach
+    void accountExists() {
+        when(accountTokens.issue(eq(42L), any())).thenAnswer(call -> Optional.of(
+                new UserDto(42L, "user@example.com", currentRole)));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"/api/health", "/api/auth/csrf"})
     void publicGetEndpointsAllowAnonymousRequests(String path) throws Exception {
@@ -57,7 +76,7 @@ class SecurityRouteAccessTest {
     }
 
     @Test
-    void publicRegistrationAndLoginRemainAvailableWithCsrf() throws Exception {
+    void publicRegistrationAndLoginRemainAvailable() throws Exception {
         UserDto user = new UserDto(42L, "user@example.com", Role.PATIENT);
         when(registrationService.register(user.email(), "password", Role.PATIENT, "Anna", "Testsson", "182003151236", null)).thenReturn(user);
         when(authenticationService.authenticate(user.email(), "password")).thenReturn(user);
@@ -81,6 +100,7 @@ class SecurityRouteAccessTest {
     @ParameterizedTest
     @EnumSource(Role.class)
     void meAllowsEveryAuthenticatedRole(Role role) throws Exception {
+        currentRole = role;
         UserDto user = new UserDto(42L, "user@example.com", role);
         mvc.perform(get("/api/auth/me").with(authentication(
                         UsernamePasswordAuthenticationToken.authenticated(user, null,
@@ -115,5 +135,24 @@ class SecurityRouteAccessTest {
     @Test
     void unmatchedAnonymousRequestCannotReachAnEndpoint() throws Exception {
         mvc.perform(get("/api/unmatched")).andExpect(status().isUnauthorized());
+    }
+
+    @ParameterizedTest
+    @EnumSource(Role.class)
+    void internalEndpointsRejectEveryUserToken(Role role) throws Exception {
+        // /internal/** is for service tokens only (docs/architecture.md §6); a real, valid user cookie is refused.
+        var cookie = TestTokens.cookieFor(new com.medinexus.medicore.security.jwt.UserClaims(42L, "user@example.com",
+                role, null, null, null, null));
+        mvc.perform(get("/internal/users").cookie(cookie)).andExpect(status().isForbidden());
+        mvc.perform(get("/internal/users")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void aServiceTokenPassesTheInternalRuleButNothingElse() throws Exception {
+        String service = "Bearer " + TestTokens.tokens().serviceToken("clinical");
+        // No /internal endpoint exists yet (EPIC-02), so passing the rule ends in 404 rather than 401/403.
+        mvc.perform(get("/internal/users").header("Authorization", service)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/auth/me").header("Authorization", service)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/auth/profile").header("Authorization", service)).andExpect(status().isForbidden());
     }
 }

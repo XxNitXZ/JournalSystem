@@ -33,6 +33,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.entity.Role;
+import com.medinexus.medicore.auth.service.AccountTokenService;
 import com.medinexus.medicore.auth.service.AuthenticationService;
 import com.medinexus.medicore.config.SecurityConfig;
 import com.medinexus.medicore.fhir.client.FhirServerException;
@@ -58,6 +59,10 @@ class JournalAccessControllerTest {
     @MockitoBean
     private JournalAccessService service;
 
+    /** Renewing the cookie is tested in AuthenticationControllerTest; here we only check that it happens. */
+    @MockitoBean
+    private AccountTokenService accountTokens;
+
     private static UserDto user(Role role) {
         return new UserDto(42L, "user@example.test", role);
     }
@@ -74,6 +79,9 @@ class JournalAccessControllerTest {
         when(service.statusFor(user(Role.PATIENT))).thenReturn(new JournalAccessStatusDto("PENDING"));
         mvc.perform(get("/api/journal-access/me").with(as(Role.PATIENT)))
                 .andExpect(status().isOk()).andExpect(content().json("{\"status\":\"PENDING\"}", true));
+        // Reading the status renews the token, so an approval takes effect without signing in again.
+        org.mockito.Mockito.verify(accountTokens).issue(org.mockito.ArgumentMatchers.eq(42L),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @ParameterizedTest
@@ -84,7 +92,7 @@ class JournalAccessControllerTest {
     }
 
     @Test
-    void aPatientAsksForAccessWithACsrfTokenAndTheBodyIsIgnored() throws Exception {
+    void aPatientAsksForAccessAndTheBodyIsIgnored() throws Exception {
         when(service.requestAccess(user(Role.PATIENT))).thenReturn(new JournalAccessStatusDto("AWAITING_RECORD"));
         // Nothing from the client selects the account or the record.
         mvc.perform(post("/api/journal-access/me/request").with(csrf()).with(as(Role.PATIENT))
@@ -96,8 +104,7 @@ class JournalAccessControllerTest {
     }
 
     @Test
-    void askingForAccessNeedsACsrfTokenAndAPatientAccount() throws Exception {
-        mvc.perform(post("/api/journal-access/me/request").with(as(Role.PATIENT))).andExpect(status().isForbidden());
+    void askingForAccessNeedsAPatientAccount() throws Exception {
         for (Role role : List.of(Role.DOCTOR, Role.STAFF)) {
             mvc.perform(post("/api/journal-access/me/request").with(csrf()).with(as(role)))
                     .andExpect(status().isForbidden());
@@ -162,7 +169,7 @@ class JournalAccessControllerTest {
     }
 
     @Test
-    void doctorsApproveRejectAndReopenWithACsrfToken() throws Exception {
+    void doctorsApproveRejectAndReopen() throws Exception {
         when(service.approve(user(Role.DOCTOR), 5L)).thenReturn(SUMMARY);
         when(service.reject(user(Role.DOCTOR), 6L)).thenReturn(SUMMARY);
         when(service.reopen(user(Role.DOCTOR), 7L)).thenReturn(SUMMARY);
@@ -175,14 +182,6 @@ class JournalAccessControllerTest {
         verify(service).approve(user(Role.DOCTOR), 5L);
         verify(service).reject(user(Role.DOCTOR), 6L);
         verify(service).reopen(user(Role.DOCTOR), 7L);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"approve", "reject", "reopen"})
-    void decisionsWithoutCsrfTokenAreForbidden(String action) throws Exception {
-        mvc.perform(post("/api/journal-access-requests/5/" + action).with(as(Role.DOCTOR)))
-                .andExpect(status().isForbidden());
-        verifyNoInteractions(service);
     }
 
     @ParameterizedTest

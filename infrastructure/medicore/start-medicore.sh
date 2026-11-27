@@ -301,6 +301,8 @@ CREDENTIAL_PASSWORD=''
 ENV_FILE_DB_URL=''
 ENV_FILE_DB_USERNAME=''
 ENV_FILE_DB_PASSWORD=''
+ENV_FILE_JWT_SECRET=''
+CREDENTIAL_JWT_SECRET=''
 
 # Removes leading and trailing whitespace.
 trim() {
@@ -353,6 +355,7 @@ load_env_file() {
       DB_URL) ENV_FILE_DB_URL="$value" ;;
       DB_USERNAME) ENV_FILE_DB_USERNAME="$value" ;;
       DB_PASSWORD) ENV_FILE_DB_PASSWORD="$value" ;;
+      JWT_SECRET) ENV_FILE_JWT_SECRET="$value" ;;
     esac
   done < "$ENV_FILE"
 }
@@ -449,6 +452,25 @@ resolve_database_settings() {
   fail "No password entered after ${PASSWORD_ATTEMPTS} attempts. Nothing was created."
 }
 
+# JWT_SECRET signs the login cookie (NIT-327): from this shell or .env, at least 32 characters. Never printed.
+# Stores the result in CREDENTIAL_JWT_SECRET. Must be read after resolve_database_settings (which loads .env).
+resolve_jwt_secret() {
+  local source=''
+  if [ -n "$(trim "${JWT_SECRET:-}")" ]; then
+    CREDENTIAL_JWT_SECRET="$JWT_SECRET"; source='this shell'
+  elif [ -n "$ENV_FILE_JWT_SECRET" ]; then
+    CREDENTIAL_JWT_SECRET="$ENV_FILE_JWT_SECRET"; source='.env'
+  else
+    fail "JWT_SECRET is not set. Add it to .env (see .env.example), for example:
+         echo \"JWT_SECRET=\$(openssl rand -base64 48)\" >> .env"
+  fi
+  if [ "${#CREDENTIAL_JWT_SECRET}" -lt 32 ]; then
+    CREDENTIAL_JWT_SECRET=''
+    fail "JWT_SECRET from ${source} is shorter than 32 characters. Generate one with: openssl rand -base64 48"
+  fi
+  info "JWT_SECRET: set (from ${source}; not shown)."
+}
+
 # .env is only used when the container is created: say so when reusing one.
 env_file_notice() {
   if [ -f "$ENV_FILE" ]; then
@@ -488,16 +510,19 @@ create_medicore_container() {
   # environment ("--env NAME" without a value), so the password never appears
   # in the command line. The prefix assignment applies to this one command only.
   local output exit_code=0
-  output="$(DB_USERNAME="$CREDENTIAL_USER" DB_PASSWORD="$CREDENTIAL_PASSWORD" docker run --detach \
+  output="$(DB_USERNAME="$CREDENTIAL_USER" DB_PASSWORD="$CREDENTIAL_PASSWORD" JWT_SECRET="$CREDENTIAL_JWT_SECRET" \
+      docker run --detach \
       --name "$CONTAINER_NAME" \
       --network "$NETWORK_NAME" \
       --publish "${HOST_ADDRESS}:${HOST_PORT}:${CONTAINER_PORT}" \
       --env "DB_URL=${DB_URL_VALUE}" \
       --env DB_USERNAME \
       --env DB_PASSWORD \
+      --env JWT_SECRET \
       "$IMAGE_NAME" 2>&1)" || exit_code=$?
 
   CREDENTIAL_PASSWORD=''
+  CREDENTIAL_JWT_SECRET=''
 
   if [ "$exit_code" -ne 0 ]; then
     fail "'docker run' failed (exit code ${exit_code}): ${output}
@@ -601,6 +626,7 @@ main() {
     info "Container '${CONTAINER_NAME}' does not exist yet."
     assert_port_free
     resolve_database_settings
+    resolve_jwt_secret
     assert_database_credentials
     create_medicore_container
   fi

@@ -1,5 +1,6 @@
 package com.medinexus.medicore.auth.controller;
 
+import static com.medinexus.medicore.security.jwt.TestTokens.tokenCookie;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -27,10 +28,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockHttpSession;
-import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -40,17 +39,20 @@ import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.entity.Role;
 import com.medinexus.medicore.auth.entity.User;
 import com.medinexus.medicore.auth.repository.UserRepository;
+import com.medinexus.medicore.auth.service.AccountTokenService;
 import com.medinexus.medicore.auth.service.AuthenticationService;
 import com.medinexus.medicore.auth.service.ProfileService;
 import com.medinexus.medicore.config.PasswordEncoderConfig;
 import com.medinexus.medicore.config.SecurityConfig;
 
+import jakarta.servlet.http.Cookie;
+
 /**
  * GET/PATCH /api/auth/profile and POST /api/auth/password with the real security configuration, a real login
- * session and the real {@link ProfileService}; only the repository is mocked. Fictional data only.
+ * cookie and the real {@link ProfileService}; only the repository is mocked. Fictional data only.
  */
 @WebMvcTest({ProfileController.class, AuthenticationController.class})
-@Import({SecurityConfig.class, ProfileService.class, PasswordEncoderConfig.class})
+@Import({SecurityConfig.class, ProfileService.class, PasswordEncoderConfig.class, AccountTokenService.class})
 class ProfileControllerTest {
 
     private static final String PASSWORD = "a secure password";
@@ -65,6 +67,9 @@ class ProfileControllerTest {
     @MockitoBean
     private UserRepository repository;
 
+    @Autowired
+    private JwtDecoder decoder;
+
     private User account;
 
     @BeforeEach
@@ -78,31 +83,29 @@ class ProfileControllerTest {
         account.setFamilyName("Testsson");
         account.setPersonnummer("200412201971");
         when(repository.findById(7L)).thenReturn(Optional.of(account));
-        when(repository.updateEmail(eq(7L), anyString())).thenReturn(1);
+        // Like the database: a changed e-mail is what the next read of the account returns.
+        when(repository.updateEmail(eq(7L), anyString())).thenAnswer(call -> {
+            account.setEmail(call.getArgument(1));
+            return 1;
+        });
         when(repository.updatePhoneNumber(eq(7L), any())).thenReturn(1);
         when(repository.updatePasswordHash(eq(7L), anyString())).thenReturn(1);
     }
 
-    /** Signs in through the real login endpoint and returns the session. */
-    private MockHttpSession signIn(Role role) throws Exception {
+    /** Signs in through the real login endpoint and returns the token cookie. */
+    private Cookie signIn(Role role) throws Exception {
         account.setRole(role);
         when(authenticationService.authenticate("anna@example.test", PASSWORD))
                 .thenReturn(new UserDto(7L, "anna@example.test", role, "Anna", "Testsson"));
-        MockHttpSession session = new MockHttpSession();
-        mvc.perform(post("/api/auth/login").session(session).with(csrf())
-                .contentType(MediaType.APPLICATION_JSON).content(LOGIN)).andExpect(status().isOk());
-        return session;
-    }
-
-    private static SecurityContext storedContext(MockHttpSession session) {
-        return (SecurityContext) session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
+        return tokenCookie(mvc.perform(post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON).content(LOGIN)).andExpect(status().isOk()).andReturn());
     }
 
     @ParameterizedTest
     @EnumSource(Role.class)
     void everyRoleReadsItsOwnAccountWithTheReadOnlyIdentity(Role role) throws Exception {
-        MockHttpSession session = signIn(role);
-        mvc.perform(get("/api/auth/profile").session(session))
+        Cookie session = signIn(role);
+        mvc.perform(get("/api/auth/profile").cookie(session))
                 .andExpect(status().isOk())
                 .andExpect(content().json("""
                         {"givenName":"Anna","familyName":"Testsson","personnummer":"200412201971",
@@ -113,8 +116,8 @@ class ProfileControllerTest {
     @ParameterizedTest
     @ValueSource(strings = {"givenName", "familyName", "personnummer", "role", "id", "fhirPatientId"})
     void identityFieldsCannotBeChanged(String field) throws Exception {
-        MockHttpSession session = signIn(Role.DOCTOR);
-        mvc.perform(patch("/api/auth/profile").session(session).with(csrf())
+        Cookie session = signIn(Role.DOCTOR);
+        mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"" + field + "\":\"Changed\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("{\"code\":\"FIELD_NOT_EDITABLE\"}", JsonCompareMode.STRICT));
@@ -123,54 +126,53 @@ class ProfileControllerTest {
     }
 
     @Test
-    void theEmailChangeKeepsTheSessionAndMeShowsTheNewAddressAtOnce() throws Exception {
-        MockHttpSession session = signIn(Role.PATIENT);
-        String sessionId = session.getId();
-        mvc.perform(patch("/api/auth/profile").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+    void theEmailChangeRenewsTheCookieAndMeShowsTheNewAddressAtOnce() throws Exception {
+        Cookie session = signIn(Role.PATIENT);
+        Cookie renewed = tokenCookie(mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"anna.new@example.test\",\"currentPassword\":\"" + PASSWORD + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(content().json("{\"email\":\"anna.new@example.test\",\"givenName\":\"Anna\"}"))
-                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(PASSWORD))));
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(PASSWORD))))
+                .andReturn());
         verify(repository).updateEmail(7L, "anna.new@example.test");
+        // The renewed token carries the new address; the role is unchanged.
+        assertThat(decoder.decode(renewed.getValue()).getClaimAsString("email")).isEqualTo("anna.new@example.test");
+        assertThat(decoder.decode(renewed.getValue()).getClaimAsString("role")).isEqualTo("PATIENT");
 
-        mvc.perform(get("/api/auth/me").session(session))
+        mvc.perform(get("/api/auth/me").cookie(renewed))
                 .andExpect(status().isOk())
                 .andExpect(content().json("""
                         {"id":7,"email":"anna.new@example.test","role":"PATIENT","givenName":"Anna","familyName":"Testsson"}
                         """, JsonCompareMode.STRICT));
-        assertThat(session.getId()).isEqualTo(sessionId);
-        assertThat(storedContext(session).getAuthentication().getAuthorities()).extracting(Object::toString)
-                .containsExactly("ROLE_PATIENT");
-        assertThat(storedContext(session).getAuthentication().getCredentials()).isNull();
     }
 
     @Test
     void wrongPasswordsAndTakenEmailsAreRejectedWithCodes() throws Exception {
-        MockHttpSession session = signIn(Role.STAFF);
-        mvc.perform(patch("/api/auth/profile").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        Cookie session = signIn(Role.STAFF);
+        mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"new@example.test\",\"currentPassword\":\"wrong\"}"))
                 .andExpect(status().isForbidden())
                 .andExpect(content().json("{\"code\":\"CURRENT_PASSWORD_INVALID\"}", JsonCompareMode.STRICT));
         when(repository.existsByEmail("taken@example.test")).thenReturn(true);
-        mvc.perform(patch("/api/auth/profile").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"taken@example.test\",\"currentPassword\":\"" + PASSWORD + "\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(content().json("{\"code\":\"EMAIL_TAKEN\"}", JsonCompareMode.STRICT));
-        mvc.perform(patch("/api/auth/profile").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phoneNumber\":\"12\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("{\"code\":\"PHONE_INVALID\"}", JsonCompareMode.STRICT));
-        mvc.perform(patch("/api/auth/profile").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{")).andExpect(status().isBadRequest());
         verify(repository, never()).updateEmail(anyLong(), anyString());
-        // The session still has the old address.
-        mvc.perform(get("/api/auth/me").session(session)).andExpect(content().json("{\"email\":\"anna@example.test\"}"));
+        // Nothing was changed: the account still has the old address.
+        mvc.perform(get("/api/auth/me").cookie(session)).andExpect(content().json("{\"email\":\"anna@example.test\"}"));
     }
 
     @Test
     void thePhoneNumberIsSavedNormalized() throws Exception {
-        MockHttpSession session = signIn(Role.DOCTOR);
-        mvc.perform(patch("/api/auth/profile").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        Cookie session = signIn(Role.DOCTOR);
+        mvc.perform(patch("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"phoneNumber\":\"+46 70-123 45 67\"}"))
                 .andExpect(status().isOk()).andExpect(content().json("{\"phoneNumber\":\"+46701234567\"}"));
         verify(repository).updatePhoneNumber(7L, "+46701234567");
@@ -178,42 +180,38 @@ class ProfileControllerTest {
 
     @Test
     void thePasswordChangesWithTheCurrentPasswordAndNothingIsEchoed() throws Exception {
-        MockHttpSession session = signIn(Role.PATIENT);
-        mvc.perform(post("/api/auth/password").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        Cookie session = signIn(Role.PATIENT);
+        mvc.perform(post("/api/auth/password").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"currentPassword\":\"" + PASSWORD
                                 + "\",\"newPassword\":\"New-Passw0rd\",\"confirmPassword\":\"New-Passw0rd\"}"))
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
         verify(repository).updatePasswordHash(eq(7L), org.mockito.ArgumentMatchers.startsWith("$2"));
 
-        mvc.perform(post("/api/auth/password").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/api/auth/password").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"currentPassword\":\"wrong\",\"newPassword\":\"New-Passw0rd\","
                                 + "\"confirmPassword\":\"New-Passw0rd\"}"))
                 .andExpect(status().isForbidden())
                 .andExpect(content().json("{\"code\":\"CURRENT_PASSWORD_INVALID\"}", JsonCompareMode.STRICT));
-        mvc.perform(post("/api/auth/password").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/api/auth/password").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"currentPassword\":\"" + PASSWORD
                                 + "\",\"newPassword\":\"New-Passw0rd\",\"confirmPassword\":\"Other\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("{\"code\":\"PASSWORD_MISMATCH\"}", JsonCompareMode.STRICT));
-        // The session survives a password change.
-        mvc.perform(get("/api/auth/me").session(session)).andExpect(status().isOk());
+        // The sign-in survives a password change (stateless tokens stay valid until they expire).
+        mvc.perform(get("/api/auth/me").cookie(session)).andExpect(status().isOk());
     }
 
     @Test
-    void anonymousRequestsAndRequestsWithoutCsrfAreRejected() throws Exception {
+    void anonymousRequestsAndOtherMethodsAreRejected() throws Exception {
         mvc.perform(get("/api/auth/profile")).andExpect(status().isUnauthorized());
         mvc.perform(patch("/api/auth/profile").with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"phoneNumber\":\"0701234567\"}")).andExpect(status().isUnauthorized());
         mvc.perform(post("/api/auth/password").with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{}")).andExpect(status().isUnauthorized());
 
-        MockHttpSession session = signIn(Role.STAFF);
-        mvc.perform(patch("/api/auth/profile").session(session).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"phoneNumber\":\"0701234567\"}")).andExpect(status().isForbidden());
-        mvc.perform(post("/api/auth/password").session(session).contentType(MediaType.APPLICATION_JSON)
-                .content("{}")).andExpect(status().isForbidden());
-        mvc.perform(put("/api/auth/profile").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        Cookie session = signIn(Role.STAFF);
+        mvc.perform(put("/api/auth/profile").cookie(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{}")).andExpect(status().isForbidden());
         verify(repository, never()).updatePhoneNumber(anyLong(), any());
         verify(repository, never()).updatePasswordHash(anyLong(), anyString());

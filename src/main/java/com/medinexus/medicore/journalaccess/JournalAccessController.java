@@ -15,10 +15,13 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.medinexus.medicore.auth.dto.UserDto;
+import com.medinexus.medicore.auth.service.AccountTokenService;
 import com.medinexus.medicore.fhir.client.FhirServerException;
 import com.medinexus.medicore.journalaccess.dto.JournalAccessRequestDetail;
 import com.medinexus.medicore.journalaccess.dto.JournalAccessRequestSummary;
 import com.medinexus.medicore.journalaccess.dto.JournalAccessStatusDto;
+
+import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Journal access requests. DOCTOR: list, pending count, details, approve, reject and reopen
@@ -31,14 +34,22 @@ import com.medinexus.medicore.journalaccess.dto.JournalAccessStatusDto;
 public class JournalAccessController {
 
     private final JournalAccessService service;
+    private final AccountTokenService accountTokens;
 
-    public JournalAccessController(JournalAccessService service) {
+    public JournalAccessController(JournalAccessService service, AccountTokenService accountTokens) {
         this.service = service;
+        this.accountTokens = accountTokens;
     }
 
+    /**
+     * The PATIENT's access status. Also renews the token cookie: once a doctor has approved, the new token carries the
+     * patient's {@code fhirPatientId}, so their own record opens without signing in again.
+     */
     @GetMapping("/api/journal-access/me")
-    public JournalAccessStatusDto myStatus(@AuthenticationPrincipal UserDto principal) {
-        return service.statusFor(principal);
+    public JournalAccessStatusDto myStatus(@AuthenticationPrincipal UserDto principal, HttpServletResponse response) {
+        JournalAccessStatusDto status = service.statusFor(principal);
+        accountTokens.issue(principal.id(), response);
+        return status;
     }
 
     /**

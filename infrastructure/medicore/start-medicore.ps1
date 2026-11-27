@@ -404,7 +404,7 @@ function Read-EnvFile([string]$Path) {
         if ($value.Length -ge 2 -and $value[0] -eq $value[$value.Length - 1] -and ($value[0] -eq '"' -or $value[0] -eq "'")) {
             $value = $value.Substring(1, $value.Length - 2)
         }
-        if (@('DB_URL', 'DB_USERNAME', 'DB_PASSWORD') -contains $name) {
+        if (@('DB_URL', 'DB_USERNAME', 'DB_PASSWORD', 'JWT_SECRET') -contains $name) {
             $values[$name] = $value
         }
     }
@@ -512,7 +512,18 @@ function Resolve-DatabaseSettings {
         }
     }
 
-    [pscustomobject]@{ User = $user; Password = $password }
+    # JWT_SECRET signs the login cookie (NIT-327): from this session or .env, at least 32 characters. Never printed.
+    $jwtSetting = Select-Setting 'JWT_SECRET' $fromFile
+    if ($null -eq $jwtSetting) {
+        Stop-WithError ("JWT_SECRET is not set. Add it to .env (see .env.example). Generate one with:`n" +
+            '       $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)')
+    }
+    if ($jwtSetting.Value.Length -lt 32) {
+        Stop-WithError "JWT_SECRET from $($jwtSetting.Source) is shorter than 32 characters."
+    }
+    Write-Info "JWT_SECRET: set (from $($jwtSetting.Source); not shown)."
+
+    [pscustomobject]@{ User = $user; Password = $password; JwtSecret = $jwtSetting.Value }
 }
 
 # .env is only used when the container is created: say so when reusing one.
@@ -558,7 +569,8 @@ function New-MediCoreContainer($Credentials) {
     # DB_USERNAME and DB_PASSWORD are handed to docker through its process
     # environment ("--env NAME" without a value), so the password never
     # appears in the command line. The previous session values are restored.
-    $previous = Set-ProcessEnv @{ DB_USERNAME = $Credentials.User; DB_PASSWORD = $Credentials.Password }
+    $previous = Set-ProcessEnv @{ DB_USERNAME = $Credentials.User; DB_PASSWORD = $Credentials.Password;
+        JWT_SECRET = $Credentials.JwtSecret }
     try {
         $result = Invoke-Docker @('run', '--detach',
             '--name', $ContainerName,
@@ -567,6 +579,7 @@ function New-MediCoreContainer($Credentials) {
             '--env', "DB_URL=$DbUrl",
             '--env', 'DB_USERNAME',
             '--env', 'DB_PASSWORD',
+            '--env', 'JWT_SECRET',
             $ImageName)
     }
     finally {

@@ -6,12 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -25,9 +20,9 @@ import com.medinexus.medicore.auth.dto.PasswordChangeRequest;
 import com.medinexus.medicore.auth.dto.ProfileUpdateRequest;
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.service.AccountChangeException;
+import com.medinexus.medicore.auth.service.AccountTokenService;
 import com.medinexus.medicore.auth.service.ProfileService;
 
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
@@ -49,11 +44,11 @@ import jakarta.servlet.http.HttpServletResponse;
 public class ProfileController {
 
     private final ProfileService profileService;
-    private final SecurityContextRepository contextRepository;
+    private final AccountTokenService accountTokens;
 
-    public ProfileController(ProfileService profileService, SecurityContextRepository contextRepository) {
+    public ProfileController(ProfileService profileService, AccountTokenService accountTokens) {
         this.profileService = profileService;
-        this.contextRepository = contextRepository;
+        this.accountTokens = accountTokens;
     }
 
     @GetMapping("/profile")
@@ -63,17 +58,10 @@ public class ProfileController {
 
     @PatchMapping("/profile")
     public AccountProfileDto updateProfile(@AuthenticationPrincipal UserDto principal,
-            @RequestBody Map<String, Object> body, HttpServletRequest request, HttpServletResponse response) {
+            @RequestBody Map<String, Object> body, HttpServletResponse response) {
         ProfileService.ContactChange change = profileService.updateContact(principal, ProfileUpdateRequest.from(body));
-
-        Authentication current = SecurityContextHolder.getContext().getAuthentication();
-        UsernamePasswordAuthenticationToken replacement =
-                UsernamePasswordAuthenticationToken.authenticated(change.principal(), null, current.getAuthorities());
-        replacement.setDetails(current.getDetails());
-        SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(replacement);
-        SecurityContextHolder.setContext(context);
-        contextRepository.saveContext(context, request, response);
+        // The e-mail may have changed, and it is a token claim: issue a new token with the stored values.
+        accountTokens.issue(change.principal().id(), response);
         return change.profile();
     }
 

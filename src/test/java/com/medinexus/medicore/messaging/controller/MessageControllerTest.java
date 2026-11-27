@@ -110,15 +110,6 @@ class MessageControllerTest {
     }
 
     @Test
-    void requiresCsrf() throws Exception {
-        mvc.perform(post("/api/messages").with(signedIn(Role.PATIENT))
-                .contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isForbidden());
-        mvc.perform(post("/api/messages").with(signedIn(Role.PATIENT)).with(csrf().useInvalidToken())
-                .contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isForbidden());
-        verifyNoInteractions(users, messages);
-    }
-
-    @Test
     void rejectsDeletedSender() throws Exception {
         when(users.findById(1L)).thenReturn(Optional.empty());
         rejected(BODY, 403);

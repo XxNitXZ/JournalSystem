@@ -1,15 +1,17 @@
 package com.medinexus.medicore.auth.controller;
 
+import static com.medinexus.medicore.security.jwt.TestTokens.account;
+import static com.medinexus.medicore.security.jwt.TestTokens.tokenCookie;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -19,9 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockHttpSession;
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
@@ -29,11 +30,17 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import com.medinexus.medicore.auth.dto.UserDto;
 import com.medinexus.medicore.auth.entity.Role;
+import com.medinexus.medicore.auth.entity.User;
+import com.medinexus.medicore.auth.repository.UserRepository;
+import com.medinexus.medicore.auth.service.AccountTokenService;
 import com.medinexus.medicore.auth.service.AuthenticationService;
 import com.medinexus.medicore.config.SecurityConfig;
 
+import jakarta.servlet.http.Cookie;
+
+/** Login, {@code /me} and logout with the signed token cookie (NIT-327). */
 @WebMvcTest(AuthenticationController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, AccountTokenService.class})
 class AuthenticationControllerTest {
 
     private static final String LOGIN = """
@@ -43,146 +50,161 @@ class AuthenticationControllerTest {
     @Autowired
     private MockMvc mvc;
 
+    @Autowired
+    private JwtDecoder decoder;
+
     @MockitoBean
     private AuthenticationService service;
 
+    @MockitoBean
+    private UserRepository users;
+
+    private User stored(Role role, String givenName, String familyName) {
+        User account = account(42L, "user@example.com", role, givenName, familyName);
+        when(users.findById(42L)).thenReturn(Optional.of(account));
+        when(service.authenticate("user@example.com", "a secure password"))
+                .thenReturn(new UserDto(42L, "user@example.com", role, givenName, familyName));
+        return account;
+    }
+
+    private Cookie login() throws Exception {
+        return tokenCookie(mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN))
+                .andExpect(status().isOk()).andReturn());
+    }
+
     @ParameterizedTest
     @EnumSource(Role.class)
-    void loginPersistsSafePrincipalAndRotatesSessionId(Role role) throws Exception {
-        UserDto user = new UserDto(42L, "user@example.com", role, "Anna", "Testsson");
-        when(service.authenticate("user@example.com", "a secure password")).thenReturn(user);
-        MockHttpSession session = new MockHttpSession();
-        String oldId = session.getId();
+    void loginSetsASignedHttpOnlyStrictCookieThatAuthenticatesMe(Role role) throws Exception {
+        stored(role, "Anna", "Testsson");
         String body = """
                 {"id":42,"email":"user@example.com","role":"%s","givenName":"Anna","familyName":"Testsson"}
                 """.formatted(role);
 
-        mvc.perform(post("/api/auth/login").session(session).with(request -> {
-                    request.setRequestedSessionId(oldId);
-                    request.setRequestedSessionIdValid(true);
-                    return request;
-                }).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN))
+        MvcResult result = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN))
                 .andExpect(status().isOk())
-                .andExpect(content().json(body, JsonCompareMode.STRICT));
+                .andExpect(content().json(body, JsonCompareMode.STRICT))
+                .andReturn();
 
-        assertThat(session.getId()).isNotEqualTo(oldId);
-        SecurityContext context = (SecurityContext) session.getAttribute(
-                HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
-        assertThat(context.getAuthentication().getCredentials()).isNull();
-        assertThat(context.getAuthentication().getPrincipal()).isEqualTo(user);
-        mvc.perform(get("/api/auth/me").session(session))
+        String setCookie = result.getResponse().getHeader("Set-Cookie");
+        assertThat(setCookie).startsWith("medicore_token=").contains("HttpOnly", "SameSite=Strict", "Path=/",
+                "Max-Age=1800");
+        assertThat(result.getRequest().getSession(false)).as("no HTTP session").isNull();
+        Cookie cookie = tokenCookie(result);
+        Jwt token = decoder.decode(cookie.getValue());
+        assertThat(token.getSubject()).isEqualTo("42");
+        assertThat(token.getClaimAsString("role")).isEqualTo(role.name());
+        assertThat(token.getClaimAsString("typ")).isEqualTo("user");
+
+        mvc.perform(get("/api/auth/me").cookie(cookie))
                 .andExpect(status().isOk())
                 .andExpect(content().json(body, JsonCompareMode.STRICT));
         mvc.perform(get("/api/auth/me")).andExpect(status().isUnauthorized());
     }
 
     @Test
-    void anAccountWithoutStoredNamesSignsInWithNullNames() throws Exception {
-        // Accounts created before names were stored (V4) keep working; their names are null, never invented.
-        UserDto user = new UserDto(42L, "user@example.com", Role.STAFF);
-        when(service.authenticate("user@example.com", "a secure password")).thenReturn(user);
-        MockHttpSession session = new MockHttpSession();
-        String body = """
-                {"id":42,"email":"user@example.com","role":"STAFF","givenName":null,"familyName":null}
-                """;
-        mvc.perform(post("/api/auth/login").session(session).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN))
-                .andExpect(status().isOk())
-                .andExpect(content().json(body, JsonCompareMode.STRICT));
-        mvc.perform(get("/api/auth/me").session(session))
-                .andExpect(status().isOk())
-                .andExpect(content().json(body, JsonCompareMode.STRICT));
+    void theTokenCarriesTheLinkedFhirIdsSoOtherServicesNeedNoLookup() throws Exception {
+        stored(Role.PATIENT, "Anna", "Testsson").setFhirPatientId("syn-patient-1");
+        Jwt token = decoder.decode(login().getValue());
+        assertThat(token.getClaimAsString("fhirPatientId")).isEqualTo("syn-patient-1");
+        assertThat(token.hasClaim("fhirPractitionerId")).isFalse();
+        assertThat(token.hasClaim("password")).isFalse();
+        assertThat(token.hasClaim("personnummer")).isFalse();
     }
 
     @Test
-    void loginCreatesSessionWhenNeeded() throws Exception {
-        when(service.authenticate("user@example.com", "a secure password"))
-                .thenReturn(new UserDto(42L, "user@example.com", Role.PATIENT));
-        MvcResult result = mvc.perform(post("/api/auth/login").with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN))
-                .andExpect(status().isOk()).andReturn();
-        assertThat(result.getRequest().getSession(false)).isNotNull();
+    void meRenewsTheCookieWithClaimsReadFreshFromTheDatabase() throws Exception {
+        // A patient approved for journal access after login gets the new FHIR id without signing in again.
+        User account = stored(Role.PATIENT, "Anna", "Testsson");
+        Cookie beforeApproval = login();
+        assertThat(decoder.decode(beforeApproval.getValue()).hasClaim("fhirPatientId")).isFalse();
+        account.setFhirPatientId("syn-patient-1");
+
+        Cookie renewed = tokenCookie(mvc.perform(get("/api/auth/me").cookie(beforeApproval))
+                .andExpect(status().isOk()).andReturn());
+
+        assertThat(decoder.decode(renewed.getValue()).getClaimAsString("fhirPatientId")).isEqualTo("syn-patient-1");
+    }
+
+    @Test
+    void anAccountDeletedAfterLoginIsSignedOutByMe() throws Exception {
+        stored(Role.STAFF, "Anna", "Testsson");
+        Cookie cookie = login();
+        when(users.findById(42L)).thenReturn(Optional.empty());
+        mvc.perform(get("/api/auth/me").cookie(cookie))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Max-Age=0")));
+    }
+
+    @Test
+    void anAccountWithoutStoredNamesSignsInWithNullNames() throws Exception {
+        // Accounts created before names were stored (V4) keep working; their names are null, never invented.
+        stored(Role.STAFF, null, null);
+        String body = """
+                {"id":42,"email":"user@example.com","role":"STAFF","givenName":null,"familyName":null}
+                """;
+        Cookie cookie = tokenCookie(mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(LOGIN))
+                .andExpect(status().isOk())
+                .andExpect(content().json(body, JsonCompareMode.STRICT)).andReturn());
+        mvc.perform(get("/api/auth/me").cookie(cookie))
+                .andExpect(status().isOk())
+                .andExpect(content().json(body, JsonCompareMode.STRICT));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"Invalid email or password", "Internal sensitive details"})
-    void failedCredentialsHaveGenericResponseAndNoAuthentication(String message) throws Exception {
+    void failedCredentialsHaveGenericResponseAndNoCookie(String message) throws Exception {
         when(service.authenticate("user@example.com", "a secure password"))
                 .thenThrow(new IllegalArgumentException(message));
-        MockHttpSession session = new MockHttpSession();
-        mvc.perform(post("/api/auth/login").session(session).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN))
-                .andExpect(status().isUnauthorized()).andExpect(content().string(""));
-        assertThat(session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY)).isNull();
-        mvc.perform(get("/api/auth/me").session(session)).andExpect(status().isUnauthorized());
+        MvcResult result = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN))
+                .andExpect(status().isUnauthorized()).andExpect(content().string("")).andReturn();
+        assertThat(tokenCookie(result)).isNull();
     }
 
     @Test
     void missingCredentialsAreRejected() throws Exception {
         when(service.authenticate("", null)).thenThrow(new IllegalArgumentException("Invalid email or password"));
-        mvc.perform(post("/api/auth/login").with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
-    void loginRequiresValidCsrf() throws Exception {
-        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN))
-                .andExpect(status().isForbidden());
-        mvc.perform(post("/api/auth/login").with(csrf().useInvalidToken())
-                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN))
-                .andExpect(status().isForbidden());
-        verifyNoInteractions(service);
-    }
-
-    @Test
-    void csrfEndpointSupportsRealTokenRoundTripAndRefreshAfterLogin() throws Exception {
-        MvcResult bootstrap = mvc.perform(get("/api/auth/csrf"))
-                .andExpect(status().isOk()).andReturn();
-        MockHttpSession session = (MockHttpSession) bootstrap.getRequest().getSession(false);
-        // Read the actual masked token returned to the browser, rather than using a test token.
-        tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
-        var json = mapper.readTree(bootstrap.getResponse().getContentAsString());
-        String token = json.get("token").asString();
-        String headerName = json.get("headerName").asString();
-        when(service.authenticate("user@example.com", "a secure password"))
-                .thenReturn(new UserDto(42L, "user@example.com", Role.PATIENT));
-
-        mvc.perform(post("/api/auth/login").session(session).header(headerName, token)
-                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN))
+    void anExpiredCookieDoesNotBlockLogin() throws Exception {
+        // A stale cookie left in the browser must not turn login into 401.
+        stored(Role.PATIENT, "Anna", "Testsson");
+        Cookie expired = new Cookie("medicore_token", com.medinexus.medicore.security.jwt.TestTokens
+                .tokens(java.time.Instant.now().minusSeconds(3600)).userToken(
+                        new com.medinexus.medicore.security.jwt.UserClaims(42L, "user@example.com", Role.PATIENT,
+                                null, null, null, null)));
+        mvc.perform(post("/api/auth/login").cookie(expired).contentType(MediaType.APPLICATION_JSON).content(LOGIN))
                 .andExpect(status().isOk());
-        mvc.perform(post("/api/auth/logout").session(session).header(headerName, token))
-                .andExpect(status().isForbidden());
-        MvcResult refreshed = mvc.perform(get("/api/auth/csrf").session(session))
-                .andExpect(status().isOk()).andReturn();
-        String freshToken = mapper.readTree(refreshed.getResponse().getContentAsString()).get("token").asString();
-        mvc.perform(post("/api/auth/logout").session(session).header(headerName, freshToken))
-                .andExpect(status().isNoContent());
-        assertThat(session.isInvalid()).isTrue();
+        mvc.perform(get("/api/auth/me").cookie(expired)).andExpect(status().isUnauthorized());
     }
 
     @Test
-    void logoutInvalidatesSessionAndOldCookieCannotRestoreAuthentication() throws Exception {
-        when(service.authenticate("user@example.com", "a secure password"))
-                .thenReturn(new UserDto(42L, "user@example.com", Role.PATIENT));
-        MvcResult login = mvc.perform(post("/api/auth/login").with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN)).andReturn();
-        MockHttpSession session = (MockHttpSession) login.getRequest().getSession(false);
-        String oldId = session.getId();
-        mvc.perform(post("/api/auth/logout").session(session))
-                .andExpect(status().isForbidden());
-        mvc.perform(get("/api/auth/me").session(session)).andExpect(status().isOk());
-        mvc.perform(post("/api/auth/logout").session(session).with(csrf()))
+    void logoutClearsTheCookie() throws Exception {
+        stored(Role.PATIENT, "Anna", "Testsson");
+        Cookie cookie = login();
+        MvcResult logout = mvc.perform(post("/api/auth/logout").cookie(cookie))
                 .andExpect(status().isNoContent())
-                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Max-Age=0")));
-        assertThat(session.isInvalid()).isTrue();
-        mvc.perform(get("/api/auth/me").cookie(new jakarta.servlet.http.Cookie("JSESSIONID", oldId)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Max-Age=0")))
+                .andReturn();
+        assertThat(tokenCookie(logout).getValue()).isEmpty();
+        // Logout works without a cookie too, and only with POST.
+        mvc.perform(post("/api/auth/logout")).andExpect(status().isNoContent());
+        mvc.perform(get("/api/auth/logout").cookie(cookie)).andExpect(status().isForbidden());
     }
 
     @Test
-    void credentialedPreflightAllowsCsrfHeaderOnlyForConfiguredOrigins() throws Exception {
+    void theCsrfEndpointIsATemporaryNoOpForMediPortal() throws Exception {
+        // Removed in NIT-338; until then MediPortal fetches it before every POST/PATCH and sends the header.
+        mvc.perform(get("/api/auth/csrf"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"headerName\":\"X-CSRF-TOKEN\",\"token\":\"unused\"}"));
+    }
+
+    @Test
+    void credentialedPreflightIsAllowedOnlyForConfiguredOrigins() throws Exception {
         mvc.perform(options("/api/auth/login").header("Origin", "http://localhost:5173")
                         .header("Access-Control-Request-Method", "POST")
                         .header("Access-Control-Request-Headers", "content-type,x-csrf-token"))

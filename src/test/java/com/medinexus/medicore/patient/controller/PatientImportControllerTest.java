@@ -90,14 +90,12 @@ class PatientImportControllerTest {
     }
 
     @Test
-    void patientsAnonymousUsersAndRequestsWithoutCsrfAreRejected() throws Exception {
+    void patientsAndAnonymousUsersAreRejected() throws Exception {
         for (String path : List.of("/api/patients/import/search", "/api/patients/import")) {
             mvc.perform(post(path).with(csrf()).with(as(Role.PATIENT)).contentType(MediaType.APPLICATION_JSON)
                     .content("{}")).andExpect(status().isForbidden());
             mvc.perform(post(path).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{}"))
                     .andExpect(status().isUnauthorized());
-            mvc.perform(post(path).with(as(Role.DOCTOR)).contentType(MediaType.APPLICATION_JSON).content("{}"))
-                    .andExpect(status().isForbidden());
         }
         // GET /api/patients/import is the existing profile route (an ID "import"); the search path has no GET.
         mvc.perform(get("/api/patients/import/search").with(as(Role.DOCTOR))).andExpect(status().isForbidden());

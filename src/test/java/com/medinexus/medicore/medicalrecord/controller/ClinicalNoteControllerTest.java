@@ -116,13 +116,12 @@ class ClinicalNoteControllerTest {
     }
 
     @Test
-    void anonymousRequestsMissingCsrfAndOtherMethodsAreRejected() throws Exception {
+    void anonymousRequestsAndOtherMethodsAreRejected() throws Exception {
+        // CSRF tokens are gone since NIT-327 (SameSite=Strict token cookie, see JwtCookieAuthenticationIntegrationTest).
         mvc.perform(get("/api/patients/syn-patient-1/notes")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/patients/me/notes")).andExpect(status().isUnauthorized());
         mvc.perform(post("/api/patients/syn-patient-1/notes").with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content(BODY)).andExpect(status().isUnauthorized());
-        mvc.perform(post("/api/patients/syn-patient-1/notes").with(as(Role.DOCTOR))
-                .contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isForbidden());
         mvc.perform(put("/api/patients/syn-patient-1/notes").with(csrf()).with(as(Role.DOCTOR))
                 .contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isForbidden());
         mvc.perform(delete("/api/patients/syn-patient-1/notes").with(csrf()).with(as(Role.DOCTOR)))
