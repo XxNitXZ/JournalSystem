@@ -11,6 +11,7 @@ the services depend on each other. It is built up during EPIC-01:
 | Authentication (JWT cookie) | NIT-327 | ✅ [§9](#9-authentication-jwt-cookie) |
 | Error format and timeouts | NIT-328 | ✅ [§10](#10-error-format-and-timeouts) |
 | Repository layout and Maven modules | NIT-788 | ✅ [§11](#11-repository-layout-and-maven-modules) |
+| Internal API Clinical → Identity (C1–C4) | NIT-330 | ✅ [§12](#12-internal-api-clinical-endpoints-used-by-identity) |
 
 Data ownership between PostgreSQL and HAPI FHIR is unchanged and described in
 [`infrastructure/DATA_OWNERSHIP.md`](../infrastructure/DATA_OWNERSHIP.md): HAPI FHIR stays the source of truth for
@@ -202,14 +203,16 @@ These names become the Kubernetes Service names in EPIC-05 (NIT-360). Services c
 | Service name | Service port → container port | Local dev port (outside Kubernetes) |
 |---|---|---|
 | `mediportal` | 80 → 8080 (nginx-unprivileged) | 5173 (Vite dev server) |
-| `identity` | 8080 → 8080 | 8081 |
-| `clinical` | 8080 → 8080 | 8082 |
-| `messaging` | 8080 → 8080 | 8083 |
-| `search` | 8080 → 8080 | 8084 |
+| `identity` | 8080 → 8080 | 8091 |
+| `clinical` | 8080 → 8080 | 8092 |
+| `messaging` | 8080 → 8080 | 8093 |
+| `search` | 8080 → 8080 | 8094 |
 | `images` | 3000 → 3000 | 3000 |
 | `postgres` | 5432 → 5432 | 5432 (`medinexus-postgres` container) |
 
-Locally, each service needs its own port because they all run on one machine. In the cluster every pod has its own
+Locally, each service needs its own port because they all run on one machine. The local ports start at 8091, not 8081,
+because 8081 is Expo's default Metro bundler port: an Expo app on the same machine kept connecting to Identity and
+used up the local ports (2026-11-27). In the cluster every pod has its own
 address, so all Spring and Quarkus services can use 8080.
 
 ### Ingress routes
@@ -263,8 +266,8 @@ on, and it must match the endpoint tables in [§2](#2-endpoints).
 Reading a spec in the cluster:
 
 ```bash
-kubectl port-forward svc/identity 8081:8080
-# then open http://localhost:8081/swagger-ui.html
+kubectl port-forward svc/identity 8091:8080
+# then open http://localhost:8091/swagger-ui.html
 ```
 
 ### Local development without Kubernetes (Vite proxy)
@@ -275,10 +278,10 @@ prefixes as the Ingress (configured in NIT-338). Requests go to relative paths (
 
 | Prefix | → |
 |---|---|
-| `/api/auth`, `/api/journal-access`, `/api/journal-access-requests`, `/api/health` | `http://localhost:8081` |
-| `/api/patients`, `/api/practitioners`, `/api/organizations` | `http://localhost:8082` |
-| `/api/messages` | `http://localhost:8083` |
-| `/api/search` | `http://localhost:8084` |
+| `/api/auth`, `/api/journal-access`, `/api/journal-access-requests`, `/api/health` | `http://localhost:8091` |
+| `/api/patients`, `/api/practitioners`, `/api/organizations` | `http://localhost:8092` |
+| `/api/messages` | `http://localhost:8093` |
+| `/api/search` | `http://localhost:8094` |
 | `/api/images` | `http://localhost:3000` |
 
 Vite proxy keys match by plain string prefix, not by whole segment, so `/api/journal-access` would also catch
@@ -389,7 +392,7 @@ pom.xml                       parent: Spring Boot and dependency versions, modul
 services/
   common/                     medicore-common (jar + test-jar): code every Spring service shares
   monolith/                   MediCore: the Lab 1 app, unchanged; removed at the EPIC-02 cut-over
-  identity/                   Identity service, port 8081 (NIT-329; code moves in NIT-330)
+  identity/                   Identity service, port 8091: accounts, login, journal access (NIT-329, NIT-330)
   clinical/ messaging/        added in EPIC-02 (NIT-332, NIT-335)
 MediPortal/                   React frontend (npm, not part of the Maven build)
 infrastructure/  docs/
@@ -422,3 +425,47 @@ tests check tokens and error bodies the same way.
 `~/.m2` first. The parent sets `spring-boot.run.skip=true`; only runnable services set it to `false`, so
 `spring-boot:run` never tries to start the parent or `common`. With `-Dtest=…`, Surefire needs
 `-Dsurefire.failIfNoSpecifiedTests=false` because the other modules have no test of that name.
+
+## 12. Internal API: Clinical endpoints used by Identity
+
+Identity has no FHIR access (D2, D6). Whenever it needs a fact about a FHIR Patient or Practitioner, it calls these
+`/internal/**` endpoints with a **service token** (`ServiceClients`, [§10](#10-error-format-and-timeouts)).
+**Clinical owns them.** Until the Clinical service exists, the **monolith** serves them (NIT-330), and Identity
+reaches them at `CLINICAL_URL` (default `http://localhost:8080`). When Clinical is built (US-02.02), it implements
+exactly this contract and `CLINICAL_URL` becomes `http://localhost:8092` (in Kubernetes `http://clinical:8080`).
+
+**For all four endpoints:**
+- They accept only `Authorization: Bearer <service token>` (`ROLE_SERVICE`). A user token gets 403, no token 401.
+- A FHIR id must match `[A-Za-z0-9.-]{1,64}`, otherwise 400.
+- FHIR failures: not found (404/410) gives **404**; timeout or unavailable gives **503**; an invalid response gives
+  **502**. Every error uses the `ApiError` body.
+
+| # | Request | Response 2xx | Used by (Identity) |
+|---|---|---|---|
+| C1 | `GET /internal/patients/registered?personnummer=YYYYMMDDNNNN` | `200 {"records":[{"id":"…","personnummerStatus":"VALID","personnummer":"…"}]}` | `JournalAccessMatcher`: which registered patients match the account's personnummer |
+| C2 | `GET /internal/patients/{id}` | `200 {"id","givenNames":[…],"familyName","personnummerStatus","personnummer","gender","birthDate"}` | `JournalAccessService`: the record a doctor reviews, and the personnummer check on approve |
+| C3 | `POST /internal/registry/{id}` | `204` (the Patient exists in FHIR and is now in the registry; registering again changes nothing) | provisioning: link an account to an existing Patient (D5, D6) |
+| C4 | `GET /internal/practitioners/{id}` | `204` (the Practitioner exists in FHIR) | provisioning: link an account to an existing Practitioner (D6) |
+
+**Details:**
+- **C1** searches FHIR **only among registered patients** (the same exact-personnummer search as Lab 1's matcher). It
+  returns every hit with its personnummer verdict from `PatientPersonnummer`: `personnummerStatus` is one of `VALID`,
+  `AMBIGUOUS`, `INVALID` or `MISSING`, and `personnummer` is the canonical 12-digit value for `VALID`. An empty
+  registry, or no hit, gives `{"records":[]}`. A personnummer that isn't 12 digits gives 400. Identity decides what
+  a hit means (free, linked elsewhere, ambiguous), because only Identity knows the accounts.
+- **C2** answers only for a **known** patient (registered, or linked to an account). It gives 404 for others, and
+  502 if FHIR returns a different Patient than the one asked for. `givenNames`/`familyName` come from the official
+  name (else the first name). `personnummer` is canonical when `VALID`, otherwise the first stored value.
+  `gender`/`birthDate` are as in FHIR.
+- **C3** reads the Patient first. 404 if it doesn't exist; otherwise it records the id in `registered_patients`
+  (`registered_by` empty, because an operator did it, not an account).
+
+**Status (NIT-330):** the monolith serves C1–C4 in `internal.ClinicalInternalController`, tested by
+`ClinicalInternalControllerTest`. Identity calls them through `clinicalapi.ClinicalClient`, tested against a fake
+Clinical by `ClinicalClientTest`. The logic that turns FHIR identifiers into a personnummer verdict
+(`PatientPersonnummer`) and picks the record's name stays on the Clinical side. Identity only decides what a verdict
+means for an account.
+
+**One behaviour changed in the split:** if FHIR returns a different Patient than the one asked for, approving journal
+access now fails with **502** (Clinical's answer to an invalid FHIR response). Before the split it failed with the
+conflict `FHIR_PATIENT_MISSING`. It's a FHIR fault, not something the doctor can fix.

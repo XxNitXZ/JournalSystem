@@ -12,7 +12,7 @@
 
     <!--
         Identity service (US-02.01): accounts, login and the JWT cookie, profile, journal access requests.
-        Owns the "identity" schema and connects as identity_svc. Local port 8081.
+        Owns the "identity" schema and connects as identity_svc. Local port 8091.
             ./mvnw -pl services/identity -am spring-boot:run
     -->
     <artifactId>identity</artifactId>
