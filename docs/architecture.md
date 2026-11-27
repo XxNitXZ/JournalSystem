@@ -7,7 +7,7 @@ the services depend on each other. It is built up during EPIC-01:
 |---|---|---|
 | Services, ownership, cross-service dependencies | NIT-323 | ✅ this version |
 | Database schemas and Flyway split | NIT-324 | ✅ [§7](#7-database-schemas) |
-| Gateway routes and OpenAPI | NIT-326 | open (draft input in [§6](#6-input-for-later-epic-01-tasks)) |
+| Gateway routes and OpenAPI | NIT-326 | ✅ [§8](#8-gateway-routes-and-openapi) |
 | Authentication (JWT cookie) | NIT-327 | open (draft input in [§6](#6-input-for-later-epic-01-tasks)) |
 
 Data ownership between PostgreSQL and HAPI FHIR is unchanged and described in
@@ -163,11 +163,7 @@ Found during the inventory. To be decided and documented in the named task:
   routes `/internal/**`.
 - **NIT-327 (auth): CSRF.** `/api/auth/csrf` and the session CSRF token go away (SameSite=Strict cookie plus a
   same-origin Ingress). MediPortal stops calling `/api/auth/csrf` (NIT-338).
-- **NIT-326 (routes): two journal-access prefixes.** `/api/journal-access` and `/api/journal-access-requests` need
-  **two** Ingress rules. Kubernetes `Prefix` matching works on whole path segments, so the first doesn't match the
-  second.
-- **NIT-326 (routes): longest prefix wins.** `/api/patients/**` (all of it, including `/me/*`) goes to Clinical,
-  and `/api/auth/**`, `/api/journal-access*` and `/api/health` go to Identity.
+- ~~NIT-326 (routes)~~: both route findings are handled in [§8](#8-gateway-routes-and-openapi).
 ## 7. Database schemas
 
 There is one PostgreSQL instance (`medinexus_db`) with **one schema and one database user per service**. The
@@ -201,3 +197,95 @@ Each user's `search_path` is its own schema, so the services use unqualified tab
 baselines applied as each service user → copy. All rows were identical column by column, the sequences continued
 after the copied ids, a second copy was refused, and 8 cross-service reads and writes all failed with
 `permission denied`.
+
+## 8. Gateway routes and OpenAPI
+
+### Services inside the cluster
+
+These names become the Kubernetes Service names in EPIC-05 (NIT-360). Services call each other by these names, e.g.
+`http://identity:8080/internal/users?ids=1,2`.
+
+| Service name | Service port → container port | Local dev port (outside Kubernetes) |
+|---|---|---|
+| `mediportal` | 80 → 8080 (nginx-unprivileged) | 5173 (Vite dev server) |
+| `identity` | 8080 → 8080 | 8081 |
+| `clinical` | 8080 → 8080 | 8082 |
+| `messaging` | 8080 → 8080 | 8083 |
+| `search` | 8080 → 8080 | 8084 |
+| `images` | 3000 → 3000 | 3000 |
+| `postgres` | 5432 → 5432 | 5432 (`medinexus-postgres` container) |
+
+Locally, each service needs its own port because they all run on one machine. In the cluster every pod has its own
+address, so all Spring and Quarkus services can use 8080.
+
+### Ingress routes
+
+One Ingress at `http://localhost` (kind maps host ports 80/443 to the ingress controller, NIT-365). All rules use
+`pathType: Prefix`.
+
+| # | Path prefix | → Service:port | Covers |
+|---|---|---|---|
+| 1 | `/api/auth` | `identity:8080` | register, login, logout, me, profile, password |
+| 2 | `/api/journal-access` | `identity:8080` | `/me`, `/me/request` (PATIENT) |
+| 3 | `/api/journal-access-requests` | `identity:8080` | doctor review list, count, detail, decisions |
+| 4 | `/api/health` | `identity:8080` | MediPortal's health check |
+| 5 | `/api/patients` | `clinical:8080` | everything under it, including `/me/*`, `/search`, `/import*` |
+| 6 | `/api/practitioners` | `clinical:8080` | |
+| 7 | `/api/organizations` | `clinical:8080` | |
+| 8 | `/api/messages` | `messaging:8080` | |
+| 9 | `/api/images` | `images:3000` | EPIC-03 |
+| 10 | `/api/search` | `search:8080` | EPIC-04 |
+| 11 | `/` | `mediportal:80` | the React app and its static files |
+
+**How matching works.** Kubernetes `Prefix` matches **whole path segments**: `/api/patients` matches
+`/api/patients` and `/api/patients/me/notes`, but not `/api/patientsfoo`. That is why rules 2 and 3 are separate:
+`/api/journal-access` does not match `/api/journal-access-requests`. When several rules match, the **longest prefix
+wins**, so `/` (rule 11) only gets requests that no `/api/...` rule matched.
+
+**What is not routed, so it can't be reached from outside:**
+
+| Path | Why it stays internal |
+|---|---|
+| `/internal/**` | Service-to-service calls (D2–D6), protected by a service token (NIT-327) |
+| `/actuator/**`, `/q/health/**`, `/health` | Kubernetes probes call pods directly, not through the Ingress |
+| `/v3/api-docs`, `/swagger-ui`, `/q/openapi`, `/openapi.json` | Developer docs; read them with port-forward (below) |
+
+No rule points at them, so they fall through to rule 11 (`/`) like any unknown path, including unknown `/api/...`
+paths. The MediPortal nginx then answers with its SPA page or a 404. No backend service is ever reached through
+these paths from outside the cluster. (Checked with a script: all 34 paths MediPortal calls today route to the
+intended service, and `/internal/*`, `/actuator/*` and `/v3/api-docs` land on `mediportal`.)
+
+### OpenAPI per service
+
+Every service publishes its own spec. It is the contract that MediPortal (NIT-338) and the Hurl tests (EPIC-06) rely
+on, and it must match the endpoint tables in [§2](#2-endpoints).
+
+| Service | Spec | UI | Tooling |
+|---|---|---|---|
+| identity, clinical, messaging | `/v3/api-docs` | `/swagger-ui.html` | springdoc (already in Lab 1) |
+| search | `/q/openapi` | `/q/swagger-ui` | `quarkus-smallrye-openapi` |
+| images | `/openapi.json` | `/docs` | a static `openapi.yaml` served by the app (or `swagger-jsdoc`) |
+
+Reading a spec in the cluster:
+
+```bash
+kubectl port-forward svc/identity 8081:8080
+# then open http://localhost:8081/swagger-ui.html
+```
+
+### Local development without Kubernetes (Vite proxy)
+
+So that the browser sees one origin in dev too, MediPortal's Vite dev server forwards `/api/*` with the same
+prefixes as the Ingress (configured in NIT-338). Requests go to relative paths (`/api/...`); there is no
+`VITE_API_BASE_URL` or `http://localhost:8080` any more.
+
+| Prefix | → |
+|---|---|
+| `/api/auth`, `/api/journal-access`, `/api/journal-access-requests`, `/api/health` | `http://localhost:8081` |
+| `/api/patients`, `/api/practitioners`, `/api/organizations` | `http://localhost:8082` |
+| `/api/messages` | `http://localhost:8083` |
+| `/api/search` | `http://localhost:8084` |
+| `/api/images` | `http://localhost:3000` |
+
+Vite proxy keys match by plain string prefix, not by whole segment, so `/api/journal-access` would also catch
+`/api/journal-access-requests`. Here that's harmless, because both go to Identity.
