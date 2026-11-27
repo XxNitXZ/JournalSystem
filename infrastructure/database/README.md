@@ -242,7 +242,7 @@ read -rs 'DB_PASSWORD?Database password: '; echo
 # read -rs -p 'Database password: ' DB_PASSWORD; echo
 
 export DB_PASSWORD
-sh mvnw spring-boot:run
+sh mvnw -pl services/monolith -am spring-boot:run
 ```
 
 `mvnw` is not marked as executable in Git, so use `sh mvnw ...`. Running
@@ -298,7 +298,7 @@ with this extra argument:
 
 ```bash
 ./mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--management.endpoint.health.show-components=always"   # Windows
-sh mvnw spring-boot:run "-Dspring-boot.run.arguments=--management.endpoint.health.show-components=always"       # macOS
+sh mvnw -pl services/monolith -am spring-boot:run "-Dspring-boot.run.arguments=--management.endpoint.health.show-components=always"       # macOS
 ```
 
 The response then contains `"db":{"status":"UP"}`.
@@ -348,7 +348,7 @@ schema.
 
 ### Migration files
 
-Migrations live in `src/main/resources/db/migration/` and are named:
+Migrations live in `services/monolith/src/main/resources/db/migration/` and are named:
 
 ```text
 V<version>__<description>.sql
@@ -441,7 +441,7 @@ the project root:
 
 ```bash
 # macOS
-sh mvnw spring-boot:run -Dspring-boot.run.arguments="--spring.flyway.baseline-on-migrate=true --spring.flyway.baseline-version=1 --spring.main.web-application-type=none"
+sh mvnw -pl services/monolith -am spring-boot:run -Dspring-boot.run.arguments="--spring.flyway.baseline-on-migrate=true --spring.flyway.baseline-version=1 --spring.main.web-application-type=none"
 ```
 
 - The three arguments apply **to this run only**. Nothing is saved.
@@ -471,7 +471,7 @@ From now on, start MediCore normally. The log shows
 ### Adding a migration
 
 1. Create a new file with the next free version, for example
-   `src/main/resources/db/migration/V2__create_users.sql`. Check the existing
+   `services/monolith/src/main/resources/db/migration/V2__create_users.sql`. Check the existing
    files first, and coordinate version numbers with the team so two branches
    don't both use `V2`.
 2. Write plain PostgreSQL DDL. Write the matching JPA entity, or change it, to
@@ -541,7 +541,7 @@ the test on its own:
 
 ```bash
 # macOS
-sh mvnw test -Dtest=PersistenceCheckRepositoryIntegrationTest
+sh mvnw test -Dsurefire.failIfNoSpecifiedTests=false -Dtest=PersistenceCheckRepositoryIntegrationTest
 ```
 
 You can also run the whole suite with `.\mvnw.cmd test` (Windows) or

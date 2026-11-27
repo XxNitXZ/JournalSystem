@@ -36,7 +36,7 @@ explains how it was checked.
 
 ## PostgreSQL (implemented)
 
-The schema is created only by Flyway (`src/main/resources/db/migration`);
+The schema is created only by Flyway (`services/monolith/src/main/resources/db/migration`);
 Hibernate never changes it (`spring.jpa.hibernate.ddl-auto=none`).
 
 | Table | Columns | Purpose | Migration |
@@ -221,17 +221,17 @@ This document was checked against the source code by **static inspection only**
 ```bash
 # JPA entities: only User, PersistenceCheck, RegisteredPatient and JournalAccessRequest
 # (FhirIdentityProvisioning also matches: it only scans the User entity)
-grep -rln "@Entity" src/main/java
+grep -rln "@Entity" services/monolith/src/main/java
 # Repositories: UserRepository, IPersistenceCheckRepository, RegisteredPatientRepository and
 # JournalAccessRequestRepository only
-grep -rlnE "extends (Jpa|Crud|PagingAndSorting)Repository" src/main/java
+grep -rlnE "extends (Jpa|Crud|PagingAndSorting)Repository" services/monolith/src/main/java
 # Schema: only persistence_check, users, registered_patients and journal_access_requests (V1–V9)
-grep -rhnE "CREATE TABLE|ALTER TABLE|ADD COLUMN" src/main/resources/db/migration
+grep -rhnE "CREATE TABLE|ALTER TABLE|ADD COLUMN" services/monolith/src/main/resources/db/migration
 # No other persistence, caching or browser storage (expected: no output)
-grep -rnE "JdbcTemplate|EntityManager|@Cacheable|CacheManager" src/main/java
+grep -rnE "JdbcTemplate|EntityManager|@Cacheable|CacheManager" services/monolith/src/main/java
 grep -rnE "localStorage|sessionStorage|/fhir|hapi-fhir" MediPortal/src
 # FHIR clients used outside the fhir package: account linking, patient management, journal access, encounters, notes and diagnoses
-grep -rlnE "Fhir[A-Za-z]+Client" src/main/java | grep -v "/fhir/"
+grep -rlnE "Fhir[A-Za-z]+Client" services/monolith/src/main/java | grep -v "/fhir/"
 ```
 
 Expected result of the last command: `auth/service/AccountFhirIdentityService.java`,

@@ -10,6 +10,7 @@ the services depend on each other. It is built up during EPIC-01:
 | Gateway routes and OpenAPI | NIT-326 | ✅ [§8](#8-gateway-routes-and-openapi) |
 | Authentication (JWT cookie) | NIT-327 | ✅ [§9](#9-authentication-jwt-cookie) |
 | Error format and timeouts | NIT-328 | ✅ [§10](#10-error-format-and-timeouts) |
+| Repository layout and Maven modules | NIT-788 | ✅ [§11](#11-repository-layout-and-maven-modules) |
 
 Data ownership between PostgreSQL and HAPI FHIR is unchanged and described in
 [`infrastructure/DATA_OWNERSHIP.md`](../infrastructure/DATA_OWNERSHIP.md): HAPI FHIR stays the source of truth for
@@ -285,8 +286,8 @@ Vite proxy keys match by plain string prefix, not by whole segment, so `/api/jou
 
 ## 9. Authentication (JWT cookie)
 
-Implemented in the monolith first (NIT-327), in the self-contained package `com.medinexus.medicore.security.jwt`.
-NIT-788 moves that package to `common`, so every Spring service verifies tokens the same way. Node and Quarkus
+Implemented in the monolith first (NIT-327), in the self-contained package `com.medinexus.medicore.security.jwt`,
+which NIT-788 moved into the shared `services/common` module, so every Spring service verifies tokens the same way. Node and Quarkus
 verify the same HS256 tokens with `jose` and `smallrye-jwt`.
 
 **How it works**
@@ -324,7 +325,7 @@ anyone holding the cookie can read it. `HttpOnly` keeps it away from page script
 
 **Key.** One HS256 secret, `JWT_SECRET` (at least 32 bytes), shared by all services through a Kubernetes Secret
 (EPIC-05). Startup fails without it. The secret is never logged (`JwtProperties.toString()` hides it). Tests use a
-fixed test-only key in `src/test/resources/config/application.properties`.
+fixed test-only key in `services/monolith/src/test/resources/config/application.properties`.
 
 **CSRF.** No CSRF tokens. The browser never sends a `SameSite=Strict` cookie on a request started by another site,
 and behind the Ingress the frontend and the API share one origin. `GET /api/auth/csrf` returns a dummy token until
@@ -380,3 +381,43 @@ MediPortal stops asking for it (NIT-338).
 
 `ServiceClients.forService("http://identity:8080")` gives a `RestClient` with these timeouts. It also adds a fresh
 service token to every request. There are no retries, because a retried write could be applied twice.
+
+## 11. Repository layout and Maven modules
+
+```
+pom.xml                       parent: Spring Boot and dependency versions, module list (packaging: pom)
+services/
+  common/                     medicore-common (jar + test-jar): code every Spring service shares
+  monolith/                   MediCore: the Lab 1 app, unchanged; removed at the EPIC-02 cut-over
+  identity/ clinical/ messaging/   added in EPIC-02 (NIT-329, NIT-332, NIT-335)
+MediPortal/                   React frontend (npm, not part of the Maven build)
+infrastructure/  docs/
+```
+
+**What is in `common`** (package names unchanged, so no imports changed):
+
+| Package | Contents |
+|---|---|
+| `security.jwt` | JWT signing and verification, cookie, service tokens ([§9](#9-authentication-jwt-cookie)) |
+| `common.exception` | `ApiError`, `GlobalExceptionHandler` ([§10](#10-error-format-and-timeouts)) |
+| `common.http` | `ServiceClients` |
+| `auth.entity.Role`, `auth.dto.UserDto` | the principal every service gets from the token (D1) |
+| `patient.validation.Personnummer` | personnummer rules shared by Identity and Clinical (D8) |
+
+The common **test-jar** carries `TestTokens` (real test-signed tokens) and `ApiErrorMatchers`, so every service's
+tests check tokens and error bodies the same way.
+
+**Commands** (from the repository root):
+
+| Goal | Command |
+|---|---|
+| Build and test everything | `./mvnw clean verify` |
+| Build one service plus what it needs | `./mvnw -pl services/monolith -am package` |
+| Run a service | `./mvnw -pl services/monolith -am spring-boot:run` |
+| One test class | `./mvnw test -Dtest=AuthenticationControllerTest -Dsurefire.failIfNoSpecifiedTests=false` |
+| Docker image | `docker build -f infrastructure/medicore/Dockerfile -t medinexus-medicore:local .` |
+
+`-am` ("also make") builds the modules a service depends on in the same run, so nothing has to be installed to
+`~/.m2` first. The parent sets `spring-boot.run.skip=true`; only runnable services set it to `false`, so
+`spring-boot:run` never tries to start the parent or `common`. With `-Dtest=…`, Surefire needs
+`-Dsurefire.failIfNoSpecifiedTests=false` because the other modules have no test of that name.

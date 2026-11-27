@@ -15,18 +15,19 @@
 FROM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 
-# Only what the Maven build needs (see .dockerignore).
+# Only what the Maven build needs (see .dockerignore): the parent POM and the modules (NIT-788).
 COPY mvnw pom.xml ./
 COPY .mvn .mvn
-COPY src src
+COPY services/common services/common
+COPY services/monolith services/monolith
 
 # Tests are not run here: the full-context tests need a PostgreSQL database,
 # and building the image must not. Run them separately (mvnw test).
 # The cache mount keeps Maven and the dependencies between builds; it is not
 # part of any image layer.
 RUN --mount=type=cache,target=/root/.m2 \
-    sh ./mvnw --batch-mode --no-transfer-progress -DskipTests package \
- && cp target/*.jar /workspace/app.jar
+    sh ./mvnw --batch-mode --no-transfer-progress -DskipTests -pl services/monolith -am package \
+ && cp services/monolith/target/MediCore-*.jar /workspace/app.jar
 
 # ---- Stage 2: minimal Java 21 runtime with only the application JAR ----
 FROM eclipse-temurin:21-jre-alpine AS runtime

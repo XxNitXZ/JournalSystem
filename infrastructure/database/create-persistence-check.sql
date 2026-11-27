@@ -13,7 +13,7 @@
 --   description String, @Column(nullable = false)     -> VARCHAR(255) NOT NULL
 --
 -- SUPERSEDED: the table is now created by the Flyway migration
--- src/main/resources/db/migration/V1__create_persistence_check.sql.
+-- services/monolith/src/main/resources/db/migration/V1__create_persistence_check.sql.
 -- Kept for reference only. Do NOT run this on a new database: Flyway would
 -- then find a non-empty schema without history and refuse to start.
 -- See infrastructure/database/README.md, section "Database migrations (Flyway)".

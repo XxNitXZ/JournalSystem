@@ -7,7 +7,9 @@
 !pom.xml
 !mvnw
 !.mvn/
-!src/
+!services/common/
+!services/monolith/
+services/*/target/
 
 # Never send local secrets, even if they end up inside an allowed directory.
 **/.env

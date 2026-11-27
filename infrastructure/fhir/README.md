@@ -1097,7 +1097,7 @@ rewrite records. Multiple accounts with null references remain valid.
 
 ### Client settings
 
-All settings are in `src/main/resources/application.properties`:
+All settings are in `services/monolith/src/main/resources/application.properties`:
 
 | Property | Default | Meaning |
 |---|---|---|
@@ -1160,7 +1160,7 @@ export MEDINEXUS_FHIR_PROVISIONING_ACCOUNT_ID MEDINEXUS_FHIR_PROVISIONING_FHIR_I
 export FHIR_BASE_URL=https://hapi-fhir.app.cloud.cbh.kth.se/fhir
 
 java -Dloader.main=com.medinexus.provisioning.FhirIdentityProvisioning \
-  -cp target/MediCore-0.0.1-SNAPSHOT.jar \
+  -cp services/monolith/target/MediCore-0.0.1-SNAPSHOT.jar \
   org.springframework.boot.loader.launch.PropertiesLauncher \
   --medinexus.fhir.provisioning.enabled=true
 provision_status=$?
@@ -1213,7 +1213,7 @@ not this provisioning entry point.
 
 ### Opt-in connectivity test
 
-`src/test/java/com/medinexus/medicore/fhir/client/KthFhirServerConnectivityIT.java`
+`services/monolith/src/test/java/com/medinexus/medicore/fhir/client/KthFhirServerConnectivityIT.java`
 uses the real `FhirServerClient` and Spring FHIR configuration (no database) and
 sends exactly **one read-only request**, `GET [base]/metadata`. It checks that:
 
@@ -1236,7 +1236,7 @@ database):
 
 ```bash
 # macOS
-sh mvnw test -Dtest=KthFhirServerConnectivityIT -Dmedinexus.fhir.connectivity-test=true
+sh mvnw test -Dsurefire.failIfNoSpecifiedTests=false -Dtest=KthFhirServerConnectivityIT -Dmedinexus.fhir.connectivity-test=true
 ```
 
 Expected: `Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`. Without the
