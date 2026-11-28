@@ -30,6 +30,8 @@
         <module>services/monolith</module>
         <!-- Accounts, login and journal access (US-02.01). -->
         <module>services/identity</module>
+        <!-- Messages between patients and doctors/staff (US-02.03). -->
+        <module>services/messaging</module>
     </modules>
 
     <properties>
