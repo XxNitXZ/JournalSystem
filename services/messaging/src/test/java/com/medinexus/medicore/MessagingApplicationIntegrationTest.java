@@ -67,7 +67,7 @@ class MessagingApplicationIntegrationTest {
     }
 
     @Test
-    void everythingButHealthIsClosedForNow() throws Exception {
+    void messageRoutesNeedASignedInUser() throws Exception {
         HttpResponse<String> me = get("/api/messages/recipients");
         assertThat(me.statusCode()).isEqualTo(401);
         assertThat(me.body()).contains("\"status\":401");

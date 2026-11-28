@@ -27,9 +27,8 @@ import com.medinexus.medicore.security.jwt.JwtSecurityConfig;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * Messaging's security while it is a skeleton (NIT-335): only the health check is open, everything else is denied.
- * The JWT verification from {@code medicore-common} is already wired in. NIT-336 adds the message routes when the
- * messaging code moves here.
+ * Messaging's security: stateless JWT cookie or Bearer token (from {@code medicore-common}), the Lab 1 message routes
+ * with the same roles (moved here in NIT-336), the health check, and nothing else.
  */
 @Configuration
 @EnableWebSecurity
@@ -56,6 +55,13 @@ public class SecurityConfig {
                         .accessDeniedHandler((request, response, exception) -> writeError(response, 403)))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/messages/inbox/*/reply").hasAnyRole("DOCTOR", "STAFF")
+                        .requestMatchers(HttpMethod.GET, "/api/messages/inbox",
+                                "/api/messages/inbox/*").hasAnyRole("DOCTOR", "STAFF")
+                        .requestMatchers(HttpMethod.GET, "/api/messages/conversations",
+                                "/api/messages/conversations/*").hasRole("PATIENT")
+                        .requestMatchers(HttpMethod.GET, "/api/messages/recipients").hasRole("PATIENT")
+                        .requestMatchers(HttpMethod.POST, "/api/messages").hasRole("PATIENT")
                         .anyRequest().denyAll())
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> writeError(response, 401))

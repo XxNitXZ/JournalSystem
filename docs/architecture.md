@@ -12,6 +12,7 @@ the services depend on each other. It is built up during EPIC-01:
 | Error format and timeouts | NIT-328 | ✅ [§10](#10-error-format-and-timeouts) |
 | Repository layout and Maven modules | NIT-788 | ✅ [§11](#11-repository-layout-and-maven-modules) |
 | Internal API Clinical → Identity (C1–C4) | NIT-330 | ✅ [§12](#12-internal-api-clinical-endpoints-used-by-identity) |
+| Internal API Identity → Messaging (I1–I2) | NIT-336 | ✅ [§13](#13-internal-api-identity-endpoints-used-by-messaging) |
 
 Data ownership between PostgreSQL and HAPI FHIR is unchanged and described in
 [`infrastructure/DATA_OWNERSHIP.md`](../infrastructure/DATA_OWNERSHIP.md): HAPI FHIR stays the source of truth for
@@ -470,3 +471,43 @@ means for an account.
 **One behaviour changed in the split:** if FHIR returns a different Patient than the one asked for, approving journal
 access now fails with **502** (Clinical's answer to an invalid FHIR response). Before the split it failed with the
 conflict `FHIR_PATIENT_MISSING`. It's a FHIR fault, not something the doctor can fix.
+
+## 13. Internal API: Identity endpoints used by Messaging
+
+Messaging has no accounts table (D4). Whenever it needs to know who the **other** person in a conversation is, it
+calls these endpoints on Identity with a **service token**. The caller's own id and role come from the JWT (D1), so
+they are never looked up. Messaging reaches Identity at `IDENTITY_URL` (default `http://localhost:8091`, in
+Kubernetes `http://identity:8080`).
+
+**For both endpoints:**
+- They accept only `Authorization: Bearer <service token>` (`ROLE_SERVICE`). A user token gets 403, no token 401.
+- The answer holds the **public directory fields only**: `id`, `displayName`, `role`. Never e-mail, personnummer,
+  phone number or FHIR ids.
+- `displayName` is first and last name. Without stored names it is `Doctor #4`, `Staff #5` or `Patient #6`
+  (the Lab 1 rule, moved here from `MessageService`).
+- Exactly one of `ids` and `roles` must be given. Anything else, a malformed id or role, or more than 200 ids gives
+  **400**. Errors use the `ApiError` body.
+
+| # | Request | Response 200 | Used by (Messaging) |
+|---|---|---|---|
+| I1 | `GET /internal/users?ids=4,7,9` | `{"users":[{"id":4,"displayName":"Ali Khan","role":"PATIENT"}, …]}`, sorted by id; unknown ids are left out | the names and roles of a list's counterparts (one call per list); the existence and role check of one recipient |
+| I2 | `GET /internal/users?roles=DOCTOR,STAFF` | the same shape, everyone with those roles, sorted by name (case-insensitive), then role, then id | the recipient list a patient picks from |
+
+**How Messaging uses them** (`identityapi.IdentityClient`, `messaging.service.MessageService`):
+- The list queries (`conversations`, `inbox`) group `messages` by the other account's id
+  (`MessageRepository.findCounterparts`), then ask I1 for all those ids in one call (split into batches of 200).
+  Counterparts with the wrong role, or unknown to Identity, are left out. This replaces the Lab 1 SQL join on
+  `users` and its role filter. The order (newest first, then lowest id) comes from the query.
+- The inbox shows a patient only after they have written to the professional (`incomingCount > 0`), as in Lab 1.
+- Sending, replying and opening a thread check the other account with I1. Unknown gives **404**; wrong role gives
+  **403**.
+- If Identity is down or too slow, the request fails with **503** (an error answer from Identity gives **502**), and no
+  message is saved.
+
+**Behaviour changes in the split:**
+- **Your own role comes from the token.** Lab 1 re-read the caller's role from `users` on every request. Now a
+  token stays valid until it expires (30 min, [§9](#9-authentication-jwt-cookie)), the same trade-off as everywhere
+  else. The other person's role is still checked live.
+- **No foreign keys to accounts.** `messages.sender_id`/`recipient_id` can't reference `identity.users` across
+  schemas (NIT-324). The service checks every recipient with Identity before saving instead. Deleting accounts
+  doesn't exist in the app, so the old "deleting a participant is blocked" rule has nothing to protect.
